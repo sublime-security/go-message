@@ -420,6 +420,37 @@ func TestEntity_WriteTo_convert_charset_transfer(t *testing.T) {
 	}
 }
 
+func TestEntity_WriteTo_Ascii_Quotedprintable(t *testing.T) {
+	resetCharset := testSetupCharsetReaderWriter()
+	defer resetCharset()
+
+	var h Header
+	h.Set("Content-Type", "text/plain; charset=windows-1252")
+	h.Set("Content-Transfer-Encoding", "base64")
+	// "quoted é €"
+	// 71 75 6F 74 65 64 20 E9 20 80
+	r := strings.NewReader("cXVvdGVkIOkggA==")
+	e, _ := New(h, r)
+
+	h.Set("Content-Transfer-Encoding", "quoted-printable")
+	e.Header.Set("Content-Type", `text/plain; charset=csascii`)
+
+	var b bytes.Buffer
+	if err := e.WriteTo(&b); err != nil {
+		t.Fatal("Expected no error while writing entity, got", err)
+	}
+
+	expected := "Mime-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=csascii\r\n" +
+		"Content-Transfer-Encoding: quoted-printable\r\n" +
+		"\r\n" +
+		"quoted =C3=A9 =E2=82=AC"
+
+	if s := b.String(); s != expected {
+		t.Errorf("Expected written entity to be:\n%s\nbut got:\n%s", expected, s)
+	}
+}
+
 // Test going from utf-8 to windows-1252 with unsupported runes
 func TestEntity_WriteTo_invalid_charset(t *testing.T) {
 	resetCharset := testSetupCharsetReaderWriter()

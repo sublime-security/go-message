@@ -85,3 +85,23 @@ func TestUnknownCharset(t *testing.T) {
 		t.Error("Expected error to verify IsUnknownCharset")
 	}
 }
+
+func TestDispositionNoncompliantSpaces(t *testing.T) {
+	t.Skip("Skipping, since this is high complexity to fix and hasn't been done yet")
+	var h Header
+	h.Set("Content-Type", "text/html")
+	h.Set("Content-Transfer-Encoding", "base64")
+	h.Set("Content-Disposition", "attachment; filename= Slightly invalid.html")
+	expectedDisposition := "attachment"
+
+	disp, params, err := h.ContentDisposition()
+	if err != nil {
+		t.Error("Expected no error when parsing content disposition but got: ", err)
+	}
+	if disp != "attachment" {
+		t.Errorf("Expected disposition %s but got %s", expectedDisposition, disp)
+	}
+	if len(params) == 0 {
+		t.Error("Expected params to be non-empty")
+	}
+}
