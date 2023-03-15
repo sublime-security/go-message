@@ -46,17 +46,17 @@ func createWriter(w io.Writer, header *Header) (*Writer, error) {
 
 		header.Del("Content-Transfer-Encoding")
 	} else {
-		converted, err := charsetWriter(strings.ToLower(mediaParams["charset"]), ww.w)
-		if err != nil {
-			return nil, fmt.Errorf("unhandled charset %q", mediaParams["charset"])
-		}
-
-		wc, err := encodingWriter(header.Get("Content-Transfer-Encoding"), converted)
+		wc, err := encodingWriter(header.Get("Content-Transfer-Encoding"), ww.w)
 		if err != nil {
 			return nil, err
 		}
 
-		ww.w = wc
+		converted, err := charsetWriter(strings.ToLower(mediaParams["charset"]), wc)
+		if err != nil {
+			return nil, fmt.Errorf("unhandled charset %q", mediaParams["charset"])
+		}
+
+		ww.w = converted
 		ww.c = wc
 	}
 

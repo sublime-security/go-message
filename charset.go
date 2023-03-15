@@ -62,7 +62,7 @@ var CharsetWriter func(charset string, writer io.Writer) (io.Writer, error)
 // charsetWriter calls CharsetWriter if non-nil.
 func charsetWriter(charset string, writer io.Writer) (io.Writer, error) {
 	charset = strings.ToLower(charset)
-	if charset == "" || charset == "utf-8" || charset == "us-ascii" {
+	if charset == "" || charset == "utf-8" || charset == "us-ascii" || charset == "ascii" {
 		return writer, nil
 	}
 	if CharsetWriter != nil {

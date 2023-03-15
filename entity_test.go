@@ -433,7 +433,7 @@ func TestEntity_WriteTo_Ascii_Quotedprintable(t *testing.T) {
 	e, _ := New(h, r)
 
 	h.Set("Content-Transfer-Encoding", "quoted-printable")
-	e.Header.Set("Content-Type", `text/plain; charset=csascii`)
+	e.Header.Set("Content-Type", `text/plain; charset=ascii`)
 
 	var b bytes.Buffer
 	if err := e.WriteTo(&b); err != nil {
@@ -441,7 +441,7 @@ func TestEntity_WriteTo_Ascii_Quotedprintable(t *testing.T) {
 	}
 
 	expected := "Mime-Version: 1.0\r\n" +
-		"Content-Type: text/plain; charset=csascii\r\n" +
+		"Content-Type: text/plain; charset=ascii\r\n" +
 		"Content-Transfer-Encoding: quoted-printable\r\n" +
 		"\r\n" +
 		"quoted =C3=A9 =E2=82=AC"
