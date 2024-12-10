@@ -47,7 +47,7 @@ func TestHeader(t *testing.T) {
 	}
 }
 
-func TestCFWSDates(t *testing.T) {
+func TestHeader_Date_CFWS(t *testing.T) {
 	tc := []string{
 		"Mon, 22 Jul 2019 13:57:29 -0500 (GMT-05:00)",
 		"Mon, 22 Jul 2019 13:57:29 -0500",
@@ -61,6 +61,16 @@ func TestCFWSDates(t *testing.T) {
 		if err != nil {
 			t.Errorf("Failed to parse time %q: %v", tt, err)
 		}
+	}
+}
+
+func TestHeader_Date_empty(t *testing.T) {
+	var h mail.Header
+	date, err := h.Date()
+	if err != nil {
+		t.Errorf("Date() = %v", err)
+	} else if !date.IsZero() {
+		t.Errorf("Date() = %v, want time.Time{}", date)
 	}
 }
 
@@ -213,5 +223,4 @@ func TestHeader_EmptyAddressList(t *testing.T) {
 			}
 		}
 	}
-
 }
