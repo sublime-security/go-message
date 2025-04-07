@@ -430,7 +430,7 @@ func isSpace(c byte) bool {
 
 func validHeaderKeyByte(b byte) bool {
 	c := int(b)
-	return c >= 33 && c <= 126 && c != ':'
+	return c >= 32 && c <= 126 && c != ':'
 }
 
 // trim returns s with leading and trailing spaces and tabs removed.
