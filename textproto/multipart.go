@@ -84,6 +84,13 @@ func newPart(mr *MultipartReader) (*Part, error) {
 }
 
 func (bp *Part) populateHeaders() error {
+	// If there are consecutive boundaries, just return an empty header.
+	peek, _ := bp.mr.bufReader.Peek(len(bp.mr.dashBoundary))
+	if bytes.HasPrefix(peek, bp.mr.dashBoundary) {
+		bp.Header = Header{}
+		return nil
+	}
+
 	header, err := ReadHeader(bp.mr.bufReader)
 	if err == nil {
 		bp.Header = header
