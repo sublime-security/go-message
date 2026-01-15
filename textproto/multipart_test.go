@@ -877,3 +877,14 @@ func TestNoBoundary(t *testing.T) {
 		t.Errorf("NextPart error = %v; want %v", got, want)
 	}
 }
+
+func TestInvalidLineAfterBoundary(t *testing.T) {
+	testBody := "--MyBoundary\r\nThis is not a valid header line\r\n"
+	bodyReader := strings.NewReader(testBody)
+	reader := NewMultipartReader(bodyReader, "MyBoundary")
+	_, err := reader.NextPart()
+
+	if err == nil {
+		t.Error("Expected an error when parsing invalid line after boundary, got nil")
+	}
+}
