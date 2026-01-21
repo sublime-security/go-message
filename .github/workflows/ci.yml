@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    - name: Get dependencies
+      run: go mod download
+
+    - name: Check go mod tidy
+      run: |
+        go mod tidy
+        git diff-index HEAD --exit-code
+
+    - name: Run tests
+      run: go test -v -race -coverprofile=coverage.txt ./...
+
+    - name: Build
+      run: go build -v ./...

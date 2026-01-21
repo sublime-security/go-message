@@ -220,13 +220,31 @@ func TestReadHeader(t *testing.T) {
 	}
 }
 
-const testInvalidHeader = "not valid: example\r\n"
+const testInvalidHeader = "not'valid: example\r\n"
 
 func TestInvalidHeader(t *testing.T) {
 	r := bufio.NewReader(strings.NewReader(testInvalidHeader))
 	_, err := ReadHeader(r)
-	if err == nil {
+	if err != nil {
 		t.Errorf("No error thrown")
+	}
+}
+
+const testSpaceInHeader = "space okay: example\r\n"
+
+func TestSpaceInHeader(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader(testSpaceInHeader))
+	h, err := ReadHeader(r)
+	if err != nil {
+		t.Errorf("Expect no error, got: %v", err)
+	}
+
+	l := collectHeaderFields(h.Fields())
+	want := []string{
+		"space okay: example",
+	}
+	if !reflect.DeepEqual(l, want) {
+		t.Errorf("Fields() reported incorrect values: got \n%#v\n but want \n%#v", l, want)
 	}
 }
 
