@@ -760,6 +760,30 @@ val
 		},
 	},
 
+	// Two consecutive boundaries - represents an empty part between them
+	{
+		name: "two consecutive boundaries",
+		sep:  "gc0p4Jq0M2Yt08jU534c0p",
+		in:   "--gc0p4Jq0M2Yt08jU534c0p\r\nContent-Type: text/plain\r\n\r\nfirst part\r\n--gc0p4Jq0M2Yt08jU534c0p\r\n--gc0p4Jq0M2Yt08jU534c0p\r\nContent-Type: text/html\r\n\r\nlast part\r\n--gc0p4Jq0M2Yt08jU534c0p--",
+		want: []headerBody{
+			{textproto.MIMEHeader{"Content-Type": {"text/plain"}}, "first part"},
+			{textproto.MIMEHeader{}, ""}, // Empty part from consecutive boundaries
+			{textproto.MIMEHeader{"Content-Type": {"text/html"}}, "last part"},
+		},
+	},
+
+	// Three consecutive boundaries - represents two empty parts
+	{
+		name: "three consecutive boundaries",
+		sep:  "gc0p4Jq0M2Yt08jU534c0p",
+		in:   "--gc0p4Jq0M2Yt08jU534c0p\r\n--gc0p4Jq0M2Yt08jU534c0p\r\n--gc0p4Jq0M2Yt08jU534c0p\r\nContent-Type: text/plain\r\n\r\nfinal part body\r\n--gc0p4Jq0M2Yt08jU534c0p--",
+		want: []headerBody{
+			{textproto.MIMEHeader{}, ""}, // First empty part
+			{textproto.MIMEHeader{}, ""}, // Second empty part
+			{textproto.MIMEHeader{"Content-Type": {"text/plain"}}, "final part body"},
+		},
+	},
+
 	roundTripParseTest(),
 }
 
@@ -851,5 +875,16 @@ func TestNoBoundary(t *testing.T) {
 	_, err := mr.NextPart()
 	if got, want := fmt.Sprint(err), "multipart: boundary is empty"; got != want {
 		t.Errorf("NextPart error = %v; want %v", got, want)
+	}
+}
+
+func TestInvalidLineAfterBoundary(t *testing.T) {
+	testBody := "--MyBoundary\r\nThis is not a valid header line\r\n"
+	bodyReader := strings.NewReader(testBody)
+	reader := NewMultipartReader(bodyReader, "MyBoundary")
+	_, err := reader.NextPart()
+
+	if err == nil {
+		t.Error("Expected an error when parsing invalid line after boundary, got nil")
 	}
 }
