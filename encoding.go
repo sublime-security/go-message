@@ -31,7 +31,7 @@ func encodingReader(enc string, r io.Reader) (io.Reader, error) {
 	var dec io.Reader
 	switch strings.ToLower(enc) {
 	case "quoted-printable":
-		dec = quotedprintable.NewReader(bufio.NewReaderSize(r, 1024*8*8))
+		dec = quotedprintable.NewReader(bufio.NewReaderSize(r, 1024*8))
 	case "base64":
 		wrapped := &whitespaceReplacingReader{wrapped: r}
 		dec = base64.NewDecoder(base64.StdEncoding, wrapped)
