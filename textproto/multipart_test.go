@@ -879,12 +879,15 @@ func TestNoBoundary(t *testing.T) {
 }
 
 func TestInvalidLineAfterBoundary(t *testing.T) {
-	testBody := "--MyBoundary\r\nThis is not a valid header line\r\n"
+	testBody := "--MyBoundary\r\nThis is not a valid header line\r\nContent-Type: text/plain\r\n\r\nhello\r\n--MyBoundary--\r\n"
 	bodyReader := strings.NewReader(testBody)
 	reader := NewMultipartReader(bodyReader, "MyBoundary")
-	_, err := reader.NextPart()
+	part, err := reader.NextPart()
 
-	if err == nil {
-		t.Error("Expected an error when parsing invalid line after boundary, got nil")
+	if err != nil {
+		t.Fatalf("Expected successful parse skipping malformed line, got error: %v", err)
+	}
+	if part.Header.Get("Content-Type") != "text/plain" {
+		t.Errorf("Expected Content-Type text/plain, got %q", part.Header.Get("Content-Type"))
 	}
 }
