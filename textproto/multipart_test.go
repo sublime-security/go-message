@@ -679,6 +679,39 @@ html things
 			},
 		},
 	},
+	// Hyphen-digit suffixed inner boundaries (mirrors real-world case where outer=foo,
+	// inner=foo-5, inner-inner=foo-1). Neither --foo-5 nor --foo-1 should be matched
+	// as --foo's closing delimiter.
+	{
+		name: "inner boundaries with multiple hyphen-digit suffixes",
+		sep:  "foo",
+		in: strings.Replace(`--foo
+Content-Type: multipart/alternative; boundary="foo-5"
+
+--foo-5
+Content-Type: multipart/related; boundary="foo-1"
+
+--foo-1
+Content-Type: text/html
+
+<html>hello</html>
+--foo-1--
+--foo-5--
+--foo--`, "\n", "\r\n", -1),
+		want: []headerBody{
+			{textproto.MIMEHeader{"Content-Type": {`multipart/alternative; boundary="foo-5"`}},
+				strings.Replace(`--foo-5
+Content-Type: multipart/related; boundary="foo-1"
+
+--foo-1
+Content-Type: text/html
+
+<html>hello</html>
+--foo-1--
+--foo-5--`, "\n", "\r\n", -1),
+			},
+		},
+	},
 	// Issue 12662: Check that we don't consume the leading \r if the peekBuffer
 	// ends in '\r\n--separator-'
 	{
