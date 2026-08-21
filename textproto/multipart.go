@@ -74,10 +74,46 @@ func (r *stickyErrorReader) Read(p []byte) (n int, _ error) {
 	return n, r.err
 }
 
+// MalformedPartHeaderError is returned by NextPart when a part's header block
+// contains a line that cannot be parsed. If the reader was able to recover
+// valid headers from the remaining lines, the Part is non-nil and its Header
+// contains whatever was successfully parsed after the bad line.
+type MalformedPartHeaderError struct {
+	Err error
+}
+
+func (e *MalformedPartHeaderError) Error() string {
+	return "multipart: malformed part header: " + e.Err.Error()
+}
+
+func (e *MalformedPartHeaderError) Unwrap() error {
+	return e.Err
+}
+
+// IsMalformedPartHeader reports whether err is a MalformedPartHeaderError.
+func IsMalformedPartHeader(err error) bool {
+	var e *MalformedPartHeaderError
+	return errors.As(err, &e)
+}
+
 func newPart(mr *MultipartReader) (*Part, error) {
 	bp := &Part{mr: mr}
 	if err := bp.populateHeaders(); err != nil {
-		return nil, err
+		// The header block contained at least one unparseable line. ReadHeader
+		// consumed that line and stopped, so the reader is now positioned at
+		// the next line. Try once more: if the remaining lines form a valid
+		// header block (e.g. a single bad line preceded otherwise-valid headers)
+		// we can still deliver the part to the caller.
+		if recoveryErr := bp.populateHeaders(); recoveryErr == nil {
+			bp.r = partReader{bp}
+			return bp, &MalformedPartHeaderError{Err: err}
+		}
+		// Recovery failed. Discard through the part boundary so the reader is
+		// left in a valid state for the next NextPart call.
+		discard := &Part{mr: mr}
+		discard.r = partReader{discard}
+		io.Copy(io.Discard, discard)
+		return nil, &MalformedPartHeaderError{Err: err}
 	}
 	bp.r = partReader{bp}
 	return bp, nil
@@ -286,11 +322,11 @@ func (r *MultipartReader) NextPart() (*Part, error) {
 		if r.isBoundaryDelimiterLine(line) {
 			r.partsRead++
 			bp, err := newPart(r)
-			if err != nil {
+			if err != nil && bp == nil {
 				return nil, err
 			}
 			r.currentPart = bp
-			return bp, nil
+			return bp, err
 		}
 
 		if r.isFinalBoundary(line) {

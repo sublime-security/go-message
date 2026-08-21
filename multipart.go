@@ -25,10 +25,14 @@ type multipartReader struct {
 // NextPart implements MultipartReader.
 func (r *multipartReader) NextPart() (*Entity, error) {
 	p, err := r.r.NextPart()
-	if err != nil {
+	if err != nil && p == nil {
 		return nil, err
 	}
-	return New(Header{p.Header}, p)
+	e, entityErr := New(Header{p.Header}, p)
+	if entityErr != nil {
+		return e, entityErr
+	}
+	return e, err
 }
 
 // Close implements io.Closer.
