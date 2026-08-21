@@ -67,6 +67,70 @@ func TestKnownCharset(t *testing.T) {
 	}
 }
 
+func TestDeduplicateContentTypeParams(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "no params",
+			input: "multipart/mixed",
+			want:  "multipart/mixed",
+		},
+		{
+			name:  "no duplicates",
+			input: `multipart/mixed; boundary=abc`,
+			want:  `multipart/mixed; boundary=abc`,
+		},
+		{
+			name:  "duplicate boundary keeps first",
+			input: `multipart/mixed; boundary=abc; boundary=xyz`,
+			want:  `multipart/mixed; boundary=abc`,
+		},
+		{
+			name:  "duplicate charset keeps first",
+			input: `text/html; charset=utf-8; charset=us-ascii`,
+			want:  `text/html; charset=utf-8`,
+		},
+		{
+			name:  "quoted value with semicolon",
+			input: `multipart/mixed; boundary="ab;cd"; boundary=xyz`,
+			want:  `multipart/mixed; boundary="ab;cd"`,
+		},
+		{
+			name:  "case-insensitive param names",
+			input: `text/plain; charset=utf-8; CHARSET=us-ascii`,
+			want:  `text/plain; charset=utf-8`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deduplicateContentTypeParams(tc.input)
+			if got != tc.want {
+				t.Errorf("deduplicateContentTypeParams(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestContentTypeDuplicateParamRecovery(t *testing.T) {
+	var h Header
+	h.Set("Content-Type", `multipart/mixed; boundary=abc; boundary=xyz`)
+
+	mediaType, params, err := h.ContentType()
+	if !IsMalformedHeader(err) {
+		t.Errorf("expected IsMalformedHeader error, got %v", err)
+	}
+	if mediaType != "multipart/mixed" {
+		t.Errorf("expected media type %q, got %q", "multipart/mixed", mediaType)
+	}
+	if params["boundary"] != "abc" {
+		t.Errorf("expected boundary %q, got %q", "abc", params["boundary"])
+	}
+}
+
 func TestUnknownCharset(t *testing.T) {
 	var h Header
 

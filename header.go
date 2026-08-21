@@ -1,15 +1,197 @@
 package message
 
 import (
+	"errors"
 	"mime"
+	"strings"
 
 	"github.com/emersion/go-message/textproto"
 )
 
+// MalformedHeaderError is returned alongside recovered values when a header
+// field was malformed but could be partially recovered (e.g. duplicate
+// parameters). The accompanying return values are valid and safe to use.
+// The Err field holds the original underlying parse error.
+type MalformedHeaderError struct {
+	Err error
+}
+
+func (e *MalformedHeaderError) Error() string { return e.Err.Error() }
+func (e *MalformedHeaderError) Unwrap() error { return e.Err }
+
+// IsMalformedHeader reports whether err signals a header that was malformed
+// but recovered. When true, the other return values from ContentType or
+// ContentDisposition are valid and should be used.
+func IsMalformedHeader(err error) bool {
+	return errors.As(err, new(*MalformedHeaderError))
+}
+
+// deduplicateContentTypeParams returns a copy of s with duplicate parameter
+// names removed (first occurrence wins). It handles quoted-string values that
+// may contain semicolons or backslash-escaped characters.
+//
+// Two-pass design: the first pass detects whether any duplicate exists using a
+// stack-allocated array and strings.EqualFold (no heap allocations). The second
+// pass only runs — and only allocates — when a duplicate is actually found.
+func deduplicateContentTypeParams(s string) string {
+	idx := strings.IndexByte(s, ';')
+	if idx < 0 {
+		return s
+	}
+
+	// First pass: scan param names to detect any duplicate.
+	// The fixed-size array covers the vast majority of real Content-Type headers;
+	// if more than 8 params are present we conservatively trigger a rebuild.
+	var names [8]string
+	n := 0
+	hasDup := false
+
+	rest := s[idx:]
+	for len(rest) > 0 && !hasDup {
+		if rest[0] != ';' {
+			rest = rest[1:]
+			continue
+		}
+		rest = rest[1:]
+		rest = strings.TrimLeft(rest, " \t\r\n")
+
+		eqIdx := strings.IndexByte(rest, '=')
+		if eqIdx < 0 {
+			break
+		}
+		if semiBeforeEq := strings.IndexByte(rest[:eqIdx], ';'); semiBeforeEq >= 0 {
+			rest = rest[semiBeforeEq:]
+			continue
+		}
+
+		name := strings.TrimRight(rest[:eqIdx], " \t")
+		rest = rest[eqIdx+1:]
+
+		// Check for a duplicate before scanning past the value — if we find one
+		// we break immediately and skip the value-scanning work entirely.
+		if n >= len(names) {
+			hasDup = true // more params than our array — rebuild conservatively
+			break
+		}
+		for i := range n {
+			if strings.EqualFold(names[i], name) {
+				hasDup = true
+				break
+			}
+		}
+		if hasDup {
+			break
+		}
+		names[n] = name
+		n++
+
+		// Skip past the value to advance to the next param.
+		if len(rest) > 0 && rest[0] == '"' {
+			end := 1
+			for end < len(rest) {
+				if rest[end] == '\\' {
+					end += 2
+				} else if rest[end] == '"' {
+					end++
+					break
+				} else {
+					end++
+				}
+			}
+			rest = rest[end:]
+			rest = strings.TrimLeft(rest, " \t\r\n")
+		} else if semi := strings.IndexByte(rest, ';'); semi >= 0 {
+			rest = rest[semi:]
+		} else {
+			rest = ""
+		}
+	}
+
+	if !hasDup {
+		return s // no duplicates — return the original string unchanged
+	}
+
+	// Second pass: rebuild the string with duplicates removed.
+	seen := make(map[string]bool)
+	var result strings.Builder
+	result.WriteString(s[:idx])
+
+	rest = s[idx:]
+	for len(rest) > 0 {
+		if rest[0] != ';' {
+			rest = rest[1:]
+			continue
+		}
+		rest = rest[1:]
+		rest = strings.TrimLeft(rest, " \t\r\n")
+
+		eqIdx := strings.IndexByte(rest, '=')
+		if eqIdx < 0 {
+			break
+		}
+		if semiBeforeEq := strings.IndexByte(rest[:eqIdx], ';'); semiBeforeEq >= 0 {
+			rest = rest[semiBeforeEq:]
+			continue
+		}
+
+		name := strings.TrimRight(rest[:eqIdx], " \t")
+		rest = rest[eqIdx+1:]
+
+		var value string
+		if len(rest) > 0 && rest[0] == '"' {
+			end := 1
+			for end < len(rest) {
+				if rest[end] == '\\' {
+					end += 2
+				} else if rest[end] == '"' {
+					end++
+					break
+				} else {
+					end++
+				}
+			}
+			value = rest[:end]
+			rest = rest[end:]
+			rest = strings.TrimLeft(rest, " \t\r\n")
+		} else if semi := strings.IndexByte(rest, ';'); semi >= 0 {
+			value = strings.TrimRight(rest[:semi], " \t\r\n")
+			rest = rest[semi:]
+		} else {
+			value = strings.TrimRight(rest, " \t\r\n")
+			rest = ""
+		}
+
+		lower := strings.ToLower(name)
+		if name != "" && !seen[lower] {
+			seen[lower] = true
+			result.WriteString("; ")
+			result.WriteString(name)
+			result.WriteByte('=')
+			result.WriteString(value)
+		}
+	}
+
+	return result.String()
+}
+
 func parseHeaderWithParams(s string) (f string, params map[string]string, err error) {
 	f, params, err = mime.ParseMediaType(s)
 	if err != nil {
-		return s, nil, err
+		// Try recovery by removing duplicate parameter names
+		deduped := deduplicateContentTypeParams(s)
+		var recoveredF string
+		var recoveredParams map[string]string
+		recoveredF, recoveredParams, _ = mime.ParseMediaType(deduped)
+		if recoveredParams != nil {
+			// Wrap the original error so callers can distinguish a recovered
+			// malformed header (where the return values are valid) from a
+			// genuinely unparseable one (where params is nil).
+			f = recoveredF
+			params = recoveredParams
+			err = &MalformedHeaderError{Err: err}
+		} else {
+			return s, nil, err
+		}
 	}
 	for k, v := range params {
 		params[k], _ = decodeHeader(v)
