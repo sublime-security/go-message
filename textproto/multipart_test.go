@@ -921,3 +921,64 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 		t.Error("Expected an error when parsing invalid line after boundary, got nil")
 	}
 }
+
+// TestNestedMultipartHyphenBoundaries exercises the real-world case where inner
+// boundaries are the outer boundary plus a hyphen-digit suffix (e.g. foo-5, foo-1).
+// It reads all three levels and asserts each part has non-empty content.
+func TestNestedMultipartHyphenBoundaries(t *testing.T) {
+	const input = "--foo\r\n" +
+		"Content-Type: multipart/alternative; boundary=\"foo-5\"\r\n" +
+		"\r\n" +
+		"--foo-5\r\n" +
+		"Content-Type: multipart/related; boundary=\"foo-1\"\r\n" +
+		"\r\n" +
+		"--foo-1\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<html>hello</html>\r\n" +
+		"--foo-1--\r\n" +
+		"--foo-5--\r\n" +
+		"--foo--\r\n"
+
+	// Level 1: outer boundary "foo" — expect one part.
+	outerPart, err := NewMultipartReader(strings.NewReader(input), "foo").NextPart()
+	if err != nil {
+		t.Fatalf("outer NextPart: %v", err)
+	}
+	outerBody, err := io.ReadAll(outerPart)
+	if err != nil {
+		t.Fatalf("reading outer part body: %v", err)
+	}
+	if len(outerBody) == 0 {
+		t.Fatal("outer part body is empty")
+	}
+
+	// Level 2: middle boundary "foo-5" — expect one part.
+	middlePart, err := NewMultipartReader(bytes.NewReader(outerBody), "foo-5").NextPart()
+	if err != nil {
+		t.Fatalf("middle NextPart: %v", err)
+	}
+	middleBody, err := io.ReadAll(middlePart)
+	if err != nil {
+		t.Fatalf("reading middle part body: %v", err)
+	}
+	if len(middleBody) == 0 {
+		t.Fatal("middle part body is empty")
+	}
+
+	// Level 3: inner boundary "foo-1" — expect one part with the HTML body.
+	innerPart, err := NewMultipartReader(bytes.NewReader(middleBody), "foo-1").NextPart()
+	if err != nil {
+		t.Fatalf("inner NextPart: %v", err)
+	}
+	if got := innerPart.Header.Get("Content-Type"); got != "text/html" {
+		t.Errorf("inner part Content-Type = %q, want %q", got, "text/html")
+	}
+	innerBody, err := io.ReadAll(innerPart)
+	if err != nil {
+		t.Fatalf("reading inner part body: %v", err)
+	}
+	if got, want := string(innerBody), "<html>hello</html>"; got != want {
+		t.Errorf("inner part body = %q, want %q", got, want)
+	}
+}
