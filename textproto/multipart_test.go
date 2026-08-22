@@ -924,7 +924,7 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 
 // TestNestedMultipartHyphenBoundaries exercises the real-world case where inner
 // boundaries are the outer boundary plus a hyphen-digit suffix (e.g. foo-5, foo-1).
-// It reads all three levels and asserts each part has non-empty content.
+// It reads all three levels and asserts the exact header and body at each level.
 func TestNestedMultipartHyphenBoundaries(t *testing.T) {
 	const input = "--foo\r\n" +
 		"Content-Type: multipart/alternative; boundary=\"foo-5\"\r\n" +
@@ -940,45 +940,65 @@ func TestNestedMultipartHyphenBoundaries(t *testing.T) {
 		"--foo-5--\r\n" +
 		"--foo--\r\n"
 
-	// Level 1: outer boundary "foo" — expect one part.
+	// Level 1: outer boundary "foo".
 	outerPart, err := NewMultipartReader(strings.NewReader(input), "foo").NextPart()
 	if err != nil {
 		t.Fatalf("outer NextPart: %v", err)
+	}
+	if got, want := outerPart.Header.Get("Content-Type"), `multipart/alternative; boundary="foo-5"`; got != want {
+		t.Errorf("outer Content-Type = %q, want %q", got, want)
 	}
 	outerBody, err := io.ReadAll(outerPart)
 	if err != nil {
 		t.Fatalf("reading outer part body: %v", err)
 	}
-	if len(outerBody) == 0 {
-		t.Fatal("outer part body is empty")
+	wantOuterBody := "--foo-5\r\n" +
+		"Content-Type: multipart/related; boundary=\"foo-1\"\r\n" +
+		"\r\n" +
+		"--foo-1\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<html>hello</html>\r\n" +
+		"--foo-1--\r\n" +
+		"--foo-5--"
+	if got := string(outerBody); got != wantOuterBody {
+		t.Errorf("outer body = %q, want %q", got, wantOuterBody)
 	}
 
-	// Level 2: middle boundary "foo-5" — expect one part.
+	// Level 2: middle boundary "foo-5".
 	middlePart, err := NewMultipartReader(bytes.NewReader(outerBody), "foo-5").NextPart()
 	if err != nil {
 		t.Fatalf("middle NextPart: %v", err)
+	}
+	if got, want := middlePart.Header.Get("Content-Type"), `multipart/related; boundary="foo-1"`; got != want {
+		t.Errorf("middle Content-Type = %q, want %q", got, want)
 	}
 	middleBody, err := io.ReadAll(middlePart)
 	if err != nil {
 		t.Fatalf("reading middle part body: %v", err)
 	}
-	if len(middleBody) == 0 {
-		t.Fatal("middle part body is empty")
+	wantMiddleBody := "--foo-1\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<html>hello</html>\r\n" +
+		"--foo-1--"
+	if got := string(middleBody); got != wantMiddleBody {
+		t.Errorf("middle body = %q, want %q", got, wantMiddleBody)
 	}
 
-	// Level 3: inner boundary "foo-1" — expect one part with the HTML body.
+	// Level 3: inner boundary "foo-1".
 	innerPart, err := NewMultipartReader(bytes.NewReader(middleBody), "foo-1").NextPart()
 	if err != nil {
 		t.Fatalf("inner NextPart: %v", err)
 	}
-	if got := innerPart.Header.Get("Content-Type"); got != "text/html" {
-		t.Errorf("inner part Content-Type = %q, want %q", got, "text/html")
+	if got, want := innerPart.Header.Get("Content-Type"), "text/html"; got != want {
+		t.Errorf("inner Content-Type = %q, want %q", got, want)
 	}
 	innerBody, err := io.ReadAll(innerPart)
 	if err != nil {
 		t.Fatalf("reading inner part body: %v", err)
 	}
 	if got, want := string(innerBody), "<html>hello</html>"; got != want {
-		t.Errorf("inner part body = %q, want %q", got, want)
+		t.Errorf("inner body = %q, want %q", got, want)
 	}
 }
