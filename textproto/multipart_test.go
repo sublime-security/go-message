@@ -922,83 +922,112 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 	}
 }
 
+// TestMatchAfterPrefix exercises all return paths of matchAfterPrefix, including
+// the new single-hyphen lookahead added to distinguish --boundary-- from --boundary-X.
+func TestMatchAfterPrefix(t *testing.T) {
+	eof := io.ErrUnexpectedEOF
+	prefix := []byte("\r\n--foo")
+
+	tests := []struct {
+		name     string
+		buf      []byte
+		readErr  error
+		want     int
+	}{
+		{"buf equals prefix, no err", prefix, nil, 0},
+		{"buf equals prefix, at EOF", prefix, eof, +1},
+		{"space after prefix", append(prefix, ' '), nil, +1},
+		{"tab after prefix", append(prefix, '\t'), nil, +1},
+		{"CR after prefix", append(prefix, '\r'), nil, +1},
+		{"LF after prefix", append(prefix, '\n'), nil, +1},
+		{"other char after prefix", append(prefix, 'x'), nil, -1},
+		{"closing delimiter --", append(prefix, '-', '-'), nil, +1},
+		{"hyphen-digit suffix, not a match", append(prefix, '-', '1'), nil, -1},
+		{"hyphen-letter suffix, not a match", append(prefix, '-', 'a'), nil, -1},
+		{"single hyphen, no err: need more data", append(prefix, '-'), nil, 0},
+		{"single hyphen at EOF: closing delimiter", append(prefix, '-'), eof, +1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchAfterPrefix(tc.buf, prefix, tc.readErr)
+			if got != tc.want {
+				t.Errorf("matchAfterPrefix(%q, %q, %v) = %d, want %d",
+					tc.buf, prefix, tc.readErr, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestNestedMultipartHyphenBoundaries exercises the real-world case where inner
 // boundaries are the outer boundary plus a hyphen-digit suffix (e.g. foo-5, foo-1).
 // It reads all three levels and asserts the exact header and body at each level.
 func TestNestedMultipartHyphenBoundaries(t *testing.T) {
-	const input = "--foo\r\n" +
-		"Content-Type: multipart/alternative; boundary=\"foo-5\"\r\n" +
-		"\r\n" +
-		"--foo-5\r\n" +
-		"Content-Type: multipart/related; boundary=\"foo-1\"\r\n" +
-		"\r\n" +
-		"--foo-1\r\n" +
-		"Content-Type: text/html\r\n" +
-		"\r\n" +
-		"<html>hello</html>\r\n" +
-		"--foo-1--\r\n" +
-		"--foo-5--\r\n" +
-		"--foo--\r\n"
+	crlf := func(s string) string { return strings.Replace(s, "\n", "\r\n", -1) }
 
-	// Level 1: outer boundary "foo".
-	outerPart, err := NewMultipartReader(strings.NewReader(input), "foo").NextPart()
-	if err != nil {
-		t.Fatalf("outer NextPart: %v", err)
-	}
-	if got, want := outerPart.Header.Get("Content-Type"), `multipart/alternative; boundary="foo-5"`; got != want {
-		t.Errorf("outer Content-Type = %q, want %q", got, want)
-	}
-	outerBody, err := io.ReadAll(outerPart)
-	if err != nil {
-		t.Fatalf("reading outer part body: %v", err)
-	}
-	wantOuterBody := "--foo-5\r\n" +
-		"Content-Type: multipart/related; boundary=\"foo-1\"\r\n" +
-		"\r\n" +
-		"--foo-1\r\n" +
-		"Content-Type: text/html\r\n" +
-		"\r\n" +
-		"<html>hello</html>\r\n" +
-		"--foo-1--\r\n" +
-		"--foo-5--"
-	if got := string(outerBody); got != wantOuterBody {
-		t.Errorf("outer body = %q, want %q", got, wantOuterBody)
-	}
+	input := crlf("--foo\n" +
+		"Content-Type: multipart/alternative; boundary=\"foo-5\"\n" +
+		"\n" +
+		"--foo-5\n" +
+		"Content-Type: multipart/related; boundary=\"foo-1\"\n" +
+		"\n" +
+		"--foo-1\n" +
+		"Content-Type: text/html\n" +
+		"\n" +
+		"<html>hello</html>\n" +
+		"--foo-1--\n" +
+		"--foo-5--\n" +
+		"--foo--\n")
 
-	// Level 2: middle boundary "foo-5".
-	middlePart, err := NewMultipartReader(bytes.NewReader(outerBody), "foo-5").NextPart()
-	if err != nil {
-		t.Fatalf("middle NextPart: %v", err)
-	}
-	if got, want := middlePart.Header.Get("Content-Type"), `multipart/related; boundary="foo-1"`; got != want {
-		t.Errorf("middle Content-Type = %q, want %q", got, want)
-	}
-	middleBody, err := io.ReadAll(middlePart)
-	if err != nil {
-		t.Fatalf("reading middle part body: %v", err)
-	}
-	wantMiddleBody := "--foo-1\r\n" +
-		"Content-Type: text/html\r\n" +
-		"\r\n" +
-		"<html>hello</html>\r\n" +
-		"--foo-1--"
-	if got := string(middleBody); got != wantMiddleBody {
-		t.Errorf("middle body = %q, want %q", got, wantMiddleBody)
+	levels := []struct {
+		boundary        string
+		wantContentType string
+		wantBody        string
+	}{
+		{
+			boundary:        "foo",
+			wantContentType: `multipart/alternative; boundary="foo-5"`,
+			wantBody: crlf("--foo-5\n" +
+				"Content-Type: multipart/related; boundary=\"foo-1\"\n" +
+				"\n" +
+				"--foo-1\n" +
+				"Content-Type: text/html\n" +
+				"\n" +
+				"<html>hello</html>\n" +
+				"--foo-1--\n" +
+				"--foo-5--"),
+		},
+		{
+			boundary:        "foo-5",
+			wantContentType: `multipart/related; boundary="foo-1"`,
+			wantBody: crlf("--foo-1\n" +
+				"Content-Type: text/html\n" +
+				"\n" +
+				"<html>hello</html>\n" +
+				"--foo-1--"),
+		},
+		{
+			boundary:        "foo-1",
+			wantContentType: "text/html",
+			wantBody:        "<html>hello</html>",
+		},
 	}
 
-	// Level 3: inner boundary "foo-1".
-	innerPart, err := NewMultipartReader(bytes.NewReader(middleBody), "foo-1").NextPart()
-	if err != nil {
-		t.Fatalf("inner NextPart: %v", err)
-	}
-	if got, want := innerPart.Header.Get("Content-Type"), "text/html"; got != want {
-		t.Errorf("inner Content-Type = %q, want %q", got, want)
-	}
-	innerBody, err := io.ReadAll(innerPart)
-	if err != nil {
-		t.Fatalf("reading inner part body: %v", err)
-	}
-	if got, want := string(innerBody), "<html>hello</html>"; got != want {
-		t.Errorf("inner body = %q, want %q", got, want)
+	body := []byte(input)
+	for _, level := range levels {
+		part, err := NewMultipartReader(bytes.NewReader(body), level.boundary).NextPart()
+		if err != nil {
+			t.Fatalf("NextPart for boundary %q: %v", level.boundary, err)
+		}
+		if got := part.Header.Get("Content-Type"); got != level.wantContentType {
+			t.Errorf("boundary %q: Content-Type = %q, want %q", level.boundary, got, level.wantContentType)
+		}
+		body, err = io.ReadAll(part)
+		if err != nil {
+			t.Fatalf("reading body for boundary %q: %v", level.boundary, err)
+		}
+		if got := string(body); got != level.wantBody {
+			t.Errorf("boundary %q: body = %q, want %q", level.boundary, got, level.wantBody)
+		}
 	}
 }
