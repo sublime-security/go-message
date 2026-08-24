@@ -116,19 +116,37 @@ func TestDeduplicateContentTypeParams(t *testing.T) {
 }
 
 func TestContentTypeDuplicateParamRecovery(t *testing.T) {
-	var h Header
-	h.Set("Content-Type", `multipart/mixed; boundary=abc; boundary=xyz`)
+	t.Run("normal header returns no error", func(t *testing.T) {
+		var h Header
+		h.Set("Content-Type", `multipart/mixed; boundary=abc`)
 
-	mediaType, params, err := h.ContentType()
-	if !IsMalformedHeader(err) {
-		t.Errorf("expected IsMalformedHeader error, got %v", err)
-	}
-	if mediaType != "multipart/mixed" {
-		t.Errorf("expected media type %q, got %q", "multipart/mixed", mediaType)
-	}
-	if params["boundary"] != "abc" {
-		t.Errorf("expected boundary %q, got %q", "abc", params["boundary"])
-	}
+		mediaType, params, err := h.ContentType()
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if mediaType != "multipart/mixed" {
+			t.Errorf("expected media type %q, got %q", "multipart/mixed", mediaType)
+		}
+		if params["boundary"] != "abc" {
+			t.Errorf("expected boundary %q, got %q", "abc", params["boundary"])
+		}
+	})
+
+	t.Run("duplicate param is recovered with MalformedHeader error", func(t *testing.T) {
+		var h Header
+		h.Set("Content-Type", `multipart/mixed; boundary=abc; boundary=xyz`)
+
+		mediaType, params, err := h.ContentType()
+		if !IsMalformedHeader(err) {
+			t.Errorf("expected IsMalformedHeader error, got %v", err)
+		}
+		if mediaType != "multipart/mixed" {
+			t.Errorf("expected media type %q, got %q", "multipart/mixed", mediaType)
+		}
+		if params["boundary"] != "abc" {
+			t.Errorf("expected boundary %q, got %q", "abc", params["boundary"])
+		}
+	})
 }
 
 func TestUnknownCharset(t *testing.T) {
