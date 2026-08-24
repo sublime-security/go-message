@@ -1,30 +1,11 @@
 package message
 
 import (
-	"errors"
 	"mime"
 	"strings"
 
 	"github.com/emersion/go-message/textproto"
 )
-
-// MalformedHeaderError is returned alongside recovered values when a header
-// field was malformed but could be partially recovered (e.g. duplicate
-// parameters). The accompanying return values are valid and safe to use.
-// The Err field holds the original underlying parse error.
-type MalformedHeaderError struct {
-	Err error
-}
-
-func (e *MalformedHeaderError) Error() string { return e.Err.Error() }
-func (e *MalformedHeaderError) Unwrap() error { return e.Err }
-
-// IsMalformedHeader reports whether err signals a header that was malformed
-// but recovered. When true, the other return values from ContentType or
-// ContentDisposition are valid and should be used.
-func IsMalformedHeader(err error) bool {
-	return errors.As(err, new(*MalformedHeaderError))
-}
 
 // deduplicateContentTypeParams returns a copy of s with duplicate parameter
 // names removed (first occurrence wins). It handles quoted-string values that
@@ -183,12 +164,11 @@ func parseHeaderWithParams(s string) (f string, params map[string]string, err er
 		var recoveredParams map[string]string
 		recoveredF, recoveredParams, _ = mime.ParseMediaType(deduped)
 		if recoveredParams != nil {
-			// Wrap the original error so callers can distinguish a recovered
-			// malformed header (where the return values are valid) from a
-			// genuinely unparseable one (where params is nil).
+			// Recovery succeeded: return the recovered values alongside the
+			// original error. Callers can use params != nil to determine
+			// whether the values are usable.
 			f = recoveredF
 			params = recoveredParams
-			err = &MalformedHeaderError{Err: err}
 		} else {
 			return s, nil, err
 		}

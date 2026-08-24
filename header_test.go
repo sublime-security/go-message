@@ -132,13 +132,16 @@ func TestContentTypeDuplicateParamRecovery(t *testing.T) {
 		}
 	})
 
-	t.Run("duplicate param is recovered with MalformedHeader error", func(t *testing.T) {
+	t.Run("duplicate param is recovered: err non-nil but params usable", func(t *testing.T) {
 		var h Header
 		h.Set("Content-Type", `multipart/mixed; boundary=abc; boundary=xyz`)
 
 		mediaType, params, err := h.ContentType()
-		if !IsMalformedHeader(err) {
-			t.Errorf("expected IsMalformedHeader error, got %v", err)
+		if err == nil {
+			t.Error("expected non-nil error for malformed header")
+		}
+		if params == nil {
+			t.Fatal("expected non-nil params after recovery")
 		}
 		if mediaType != "multipart/mixed" {
 			t.Errorf("expected media type %q, got %q", "multipart/mixed", mediaType)
