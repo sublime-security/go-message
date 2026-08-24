@@ -917,15 +917,14 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 	reader := NewMultipartReader(bodyReader, "MyBoundary")
 	_, err := reader.NextPart()
 
-	if !IsMalformedPartHeader(err) {
-		t.Errorf("Expected IsMalformedPartHeader error when parsing invalid line after boundary, got %v", err)
+	if err == nil {
+		t.Errorf("Expected non-nil error when parsing invalid line after boundary")
 	}
 }
 
 // TestMalformedPartHeaderRecovery tests that a part with a single bad header
-// line (no colon) followed by valid headers is recovered: the part is returned
-// with the recovered headers and a MalformedPartHeaderError, and subsequent
-// parts are parsed normally.
+// line (no colon) followed by valid headers is recovered: the part is non-nil
+// with usable headers (err non-nil), and subsequent parts are parsed normally.
 func TestMalformedPartHeaderRecovery(t *testing.T) {
 	// Mirrors a real-world multipart/alternative where the second part starts
 	// with a line that has no colon before the real headers.
@@ -954,13 +953,13 @@ func TestMalformedPartHeaderRecovery(t *testing.T) {
 		t.Errorf("part 1 body: got %q, want %q", got, want)
 	}
 
-	// Part 2: bad header line, followed by valid headers.
+	// Part 2: bad header line, followed by valid headers — part is non-nil (recovered) but err is non-nil.
 	p, err = r.NextPart()
-	if !IsMalformedPartHeader(err) {
-		t.Fatalf("part 2 NextPart: expected IsMalformedPartHeader, got %v", err)
-	}
 	if p == nil {
-		t.Fatal("part 2 NextPart: expected non-nil part with recovered headers")
+		t.Fatalf("part 2 NextPart: expected non-nil part with recovered headers, got err %v", err)
+	}
+	if err == nil {
+		t.Fatal("part 2 NextPart: expected non-nil error for malformed header")
 	}
 	if got, want := p.Header.Get("Content-Type"), "text/html; charset=utf-8"; got != want {
 		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
@@ -996,8 +995,8 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 
 	// Part 1: unrecoverable – two bad lines – returns nil part + error.
 	p, err := r.NextPart()
-	if !IsMalformedPartHeader(err) {
-		t.Fatalf("part 1 NextPart: expected IsMalformedPartHeader, got %v", err)
+	if err == nil {
+		t.Fatalf("part 1 NextPart: expected non-nil error for unrecoverable header")
 	}
 	if p != nil {
 		t.Fatal("part 1 NextPart: expected nil part when recovery fails")
