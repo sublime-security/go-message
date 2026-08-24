@@ -218,8 +218,22 @@ func matchAfterPrefix(buf, prefix []byte, readErr error) int {
 		return 0
 	}
 	c := buf[len(prefix)]
-	if c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '-' {
+	if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
 		return +1
+	}
+	if c == '-' {
+		// '--boundary--' is the closing delimiter; '--boundary-suffix' is a longer,
+		// different boundary. Peek one more byte to tell them apart.
+		if len(buf) == len(prefix)+1 {
+			if readErr != nil {
+				return +1 // single '-' at EOF: treat as closing delimiter
+			}
+			return 0 // need one more byte to decide
+		}
+		if buf[len(prefix)+1] == '-' {
+			return +1 // '--boundary--': genuine closing delimiter
+		}
+		return -1 // '--boundary-X': longer boundary, not a match for this one
 	}
 	return -1
 }

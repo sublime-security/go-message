@@ -679,6 +679,39 @@ html things
 			},
 		},
 	},
+	// Hyphen-digit suffixed inner boundaries (mirrors real-world case where outer=foo,
+	// inner=foo-5, inner-inner=foo-1). Neither --foo-5 nor --foo-1 should be matched
+	// as --foo's closing delimiter.
+	{
+		name: "inner boundaries with multiple hyphen-digit suffixes",
+		sep:  "foo",
+		in: strings.Replace(`--foo
+Content-Type: multipart/alternative; boundary="foo-5"
+
+--foo-5
+Content-Type: multipart/related; boundary="foo-1"
+
+--foo-1
+Content-Type: text/html
+
+<html>hello</html>
+--foo-1--
+--foo-5--
+--foo--`, "\n", "\r\n", -1),
+		want: []headerBody{
+			{textproto.MIMEHeader{"Content-Type": {`multipart/alternative; boundary="foo-5"`}},
+				strings.Replace(`--foo-5
+Content-Type: multipart/related; boundary="foo-1"
+
+--foo-1
+Content-Type: text/html
+
+<html>hello</html>
+--foo-1--
+--foo-5--`, "\n", "\r\n", -1),
+			},
+		},
+	},
 	// Issue 12662: Check that we don't consume the leading \r if the peekBuffer
 	// ends in '\r\n--separator-'
 	{
@@ -886,5 +919,107 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 
 	if err == nil {
 		t.Error("Expected an error when parsing invalid line after boundary, got nil")
+	}
+}
+
+// TestMatchAfterPrefix exercises all return paths of matchAfterPrefix, including
+// the new single-hyphen lookahead added to distinguish --boundary-- from --boundary-X.
+func TestMatchAfterPrefix(t *testing.T) {
+	eof := io.ErrUnexpectedEOF
+	prefix := []byte("\r\n--foo")
+
+	tests := []struct {
+		name     string
+		buf      []byte
+		readErr  error
+		want     int
+	}{
+		{"buf equals prefix, no err", prefix, nil, 0},
+		{"buf equals prefix, at EOF", prefix, eof, +1},
+		{"space after prefix", append(prefix, ' '), nil, +1},
+		{"tab after prefix", append(prefix, '\t'), nil, +1},
+		{"CR after prefix", append(prefix, '\r'), nil, +1},
+		{"LF after prefix", append(prefix, '\n'), nil, +1},
+		{"other char after prefix", append(prefix, 'x'), nil, -1},
+		{"closing delimiter --", append(prefix, '-', '-'), nil, +1},
+		{"hyphen-digit suffix, not a match", append(prefix, '-', '1'), nil, -1},
+		{"hyphen-letter suffix, not a match", append(prefix, '-', 'a'), nil, -1},
+		{"single hyphen, no err: need more data", append(prefix, '-'), nil, 0},
+		{"single hyphen at EOF: closing delimiter", append(prefix, '-'), eof, +1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchAfterPrefix(tc.buf, prefix, tc.readErr)
+			if got != tc.want {
+				t.Errorf("matchAfterPrefix(%q, %q, %v) = %d, want %d",
+					tc.buf, prefix, tc.readErr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNestedMultipartHyphenBoundaries exercises the real-world case where inner
+// boundaries are the outer boundary plus a hyphen-digit suffix (e.g. foo-5, foo-1).
+// It reads all three levels and asserts the exact header and body at each level.
+func TestNestedMultipartHyphenBoundaries(t *testing.T) {
+	crlf := func(s string) string { return strings.Replace(s, "\n", "\r\n", -1) }
+
+	nestedFoo1 := "--foo-1\n" +
+		"Content-Type: text/html\n" +
+		"\n" +
+		"<html>hello</html>\n" +
+		"--foo-1--"
+
+	nestedFoo5 := "--foo-5\n" +
+		"Content-Type: multipart/related; boundary=\"foo-1\"\n" +
+		"\n" +
+		nestedFoo1 + "\n" +
+		"--foo-5--"
+
+	input := crlf("--foo\n" +
+		"Content-Type: multipart/alternative; boundary=\"foo-5\"\n" +
+		"\n" +
+		nestedFoo5 + "\n" +
+		"--foo--\n")
+
+	levels := []struct {
+		boundary        string
+		wantContentType string
+		wantBody        string
+	}{
+		{
+			boundary:        "foo",
+			wantContentType: `multipart/alternative; boundary="foo-5"`,
+			wantBody:        crlf(nestedFoo5),
+		},
+		{
+			boundary:        "foo-5",
+			wantContentType: `multipart/related; boundary="foo-1"`,
+			wantBody:        crlf(nestedFoo1),
+		},
+		{
+			boundary:        "foo-1",
+			wantContentType: "text/html",
+			wantBody:        "<html>hello</html>",
+		},
+	}
+
+	body := []byte(input)
+	for _, level := range levels {
+		part, err := NewMultipartReader(bytes.NewReader(body), level.boundary).NextPart()
+		if err != nil {
+			t.Fatalf("NextPart for boundary %q: %v", level.boundary, err)
+		}
+		if got := part.Header.Get("Content-Type"); got != level.wantContentType {
+			t.Errorf("boundary %q: Content-Type = %q, want %q", level.boundary, got, level.wantContentType)
+		}
+		body, err = io.ReadAll(part)
+		if err != nil {
+			t.Fatalf("reading body for boundary %q: %v", level.boundary, err)
+		}
+		if got := string(body); got != level.wantBody {
+			t.Errorf("boundary %q: body = %q, want %q", level.boundary, got, level.wantBody)
+		}
 	}
 }
