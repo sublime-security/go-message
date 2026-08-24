@@ -965,18 +965,22 @@ func TestMatchAfterPrefix(t *testing.T) {
 func TestNestedMultipartHyphenBoundaries(t *testing.T) {
 	crlf := func(s string) string { return strings.Replace(s, "\n", "\r\n", -1) }
 
-	input := crlf("--foo\n" +
-		"Content-Type: multipart/alternative; boundary=\"foo-5\"\n" +
-		"\n" +
-		"--foo-5\n" +
-		"Content-Type: multipart/related; boundary=\"foo-1\"\n" +
-		"\n" +
-		"--foo-1\n" +
+	nestedFoo1 := "--foo-1\n" +
 		"Content-Type: text/html\n" +
 		"\n" +
 		"<html>hello</html>\n" +
-		"--foo-1--\n" +
-		"--foo-5--\n" +
+		"--foo-1--"
+
+	nestedFoo5 := "--foo-5\n" +
+		"Content-Type: multipart/related; boundary=\"foo-1\"\n" +
+		"\n" +
+		nestedFoo1 + "\n" +
+		"--foo-5--"
+
+	input := crlf("--foo\n" +
+		"Content-Type: multipart/alternative; boundary=\"foo-5\"\n" +
+		"\n" +
+		nestedFoo5 + "\n" +
 		"--foo--\n")
 
 	levels := []struct {
@@ -987,24 +991,12 @@ func TestNestedMultipartHyphenBoundaries(t *testing.T) {
 		{
 			boundary:        "foo",
 			wantContentType: `multipart/alternative; boundary="foo-5"`,
-			wantBody: crlf("--foo-5\n" +
-				"Content-Type: multipart/related; boundary=\"foo-1\"\n" +
-				"\n" +
-				"--foo-1\n" +
-				"Content-Type: text/html\n" +
-				"\n" +
-				"<html>hello</html>\n" +
-				"--foo-1--\n" +
-				"--foo-5--"),
+			wantBody:        crlf(nestedFoo5),
 		},
 		{
 			boundary:        "foo-5",
 			wantContentType: `multipart/related; boundary="foo-1"`,
-			wantBody: crlf("--foo-1\n" +
-				"Content-Type: text/html\n" +
-				"\n" +
-				"<html>hello</html>\n" +
-				"--foo-1--"),
+			wantBody:        crlf(nestedFoo1),
 		},
 		{
 			boundary:        "foo-1",
