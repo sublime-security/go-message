@@ -35,11 +35,9 @@ func (r *multipartReader) NextPart() (*Entity, error) {
 	return e, err
 }
 
-// IsMalformedPartHeader returns a boolean indicating whether the error is
-// known to report that a multipart part's header block contained an
-// unparseable line. If NextPart also returned a non-nil Entity alongside
-// this error, the headers were recovered from the surrounding valid lines
-// and are safe to use.
+// IsMalformedPartHeader reports whether err is due to an unparseable line in
+// a multipart part's header. A non-nil Entity from NextPart alongside it
+// means the headers were recovered and are safe to use.
 func IsMalformedPartHeader(err error) bool {
 	return textproto.IsMalformedPartHeader(err)
 }

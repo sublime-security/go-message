@@ -635,10 +635,6 @@ func TestWalk_multipart(t *testing.T) {
 	}
 }
 
-// TestWalk_malformedPartHeader verifies that a part with a single bad header
-// line (no colon) doesn't abort Walk: the recovered part is still visited
-// with a usable header and body, its error verifies IsMalformedPartHeader,
-// and later siblings are still reached.
 func TestWalk_malformedPartHeader(t *testing.T) {
 	raw := "Mime-Version: 1.0\r\n" +
 		"Content-Type: multipart/mixed; boundary=sep\r\n\r\n" +

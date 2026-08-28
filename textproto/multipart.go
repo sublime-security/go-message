@@ -74,10 +74,9 @@ func (r *stickyErrorReader) Read(p []byte) (n int, _ error) {
 	return n, r.err
 }
 
-// MalformedPartHeaderError is returned by NextPart when a part's header block
-// contains a line that cannot be parsed. If the reader was able to recover
-// valid headers from the remaining lines, the Part is non-nil and its Header
-// contains whatever was successfully parsed after the bad line.
+// MalformedPartHeaderError is returned by NextPart when a part's header
+// contains an unparseable line. A non-nil Part means the rest of the
+// header was recovered and is safe to use.
 type MalformedPartHeaderError struct {
 	Err error
 }
