@@ -917,8 +917,8 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 	reader := NewMultipartReader(bodyReader, "MyBoundary")
 	_, err := reader.NextPart()
 
-	if err == nil {
-		t.Errorf("Expected non-nil error when parsing invalid line after boundary")
+	if !IsMalformedPartHeader(err) {
+		t.Errorf("Expected IsMalformedPartHeader error when parsing invalid line after boundary, got %v", err)
 	}
 }
 
@@ -958,8 +958,8 @@ func TestMalformedPartHeaderRecovery(t *testing.T) {
 	if p == nil {
 		t.Fatalf("part 2 NextPart: expected non-nil part with recovered headers, got err %v", err)
 	}
-	if err == nil {
-		t.Fatal("part 2 NextPart: expected non-nil error for malformed header")
+	if !IsMalformedPartHeader(err) {
+		t.Fatalf("part 2 NextPart: expected IsMalformedPartHeader error, got %v", err)
 	}
 	if got, want := p.Header.Get("Content-Type"), "text/html; charset=utf-8"; got != want {
 		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
@@ -995,8 +995,8 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 
 	// Part 1: unrecoverable – two bad lines – returns nil part + error.
 	p, err := r.NextPart()
-	if err == nil {
-		t.Fatalf("part 1 NextPart: expected non-nil error for unrecoverable header")
+	if !IsMalformedPartHeader(err) {
+		t.Fatalf("part 1 NextPart: expected IsMalformedPartHeader error, got %v", err)
 	}
 	if p != nil {
 		t.Fatal("part 1 NextPart: expected nil part when recovery fails")

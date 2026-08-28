@@ -74,6 +74,28 @@ func (r *stickyErrorReader) Read(p []byte) (n int, _ error) {
 	return n, r.err
 }
 
+// MalformedPartHeaderError is returned by NextPart when a part's header block
+// contains a line that cannot be parsed. If the reader was able to recover
+// valid headers from the remaining lines, the Part is non-nil and its Header
+// contains whatever was successfully parsed after the bad line.
+type MalformedPartHeaderError struct {
+	Err error
+}
+
+func (e *MalformedPartHeaderError) Error() string {
+	return "multipart: malformed part header: " + e.Err.Error()
+}
+
+func (e *MalformedPartHeaderError) Unwrap() error {
+	return e.Err
+}
+
+// IsMalformedPartHeader reports whether err is a MalformedPartHeaderError.
+func IsMalformedPartHeader(err error) bool {
+	var e *MalformedPartHeaderError
+	return errors.As(err, &e)
+}
+
 func newPart(mr *MultipartReader) (*Part, error) {
 	bp := &Part{mr: mr}
 	if err := bp.populateHeaders(); err != nil {
@@ -85,7 +107,7 @@ func newPart(mr *MultipartReader) (*Part, error) {
 		if recoveryErr := bp.populateHeaders(); recoveryErr == nil {
 			// Recovered: part != nil signals the headers are usable.
 			bp.r = partReader{bp}
-			return bp, err
+			return bp, &MalformedPartHeaderError{Err: err}
 		}
 		// Recovery failed. Discard through the part boundary so the reader is
 		// left in a valid state for the next NextPart call.
@@ -93,7 +115,7 @@ func newPart(mr *MultipartReader) (*Part, error) {
 		discard.r = partReader{discard}
 		io.Copy(io.Discard, discard)
 		// part == nil signals the part was unrecoverable.
-		return nil, err
+		return nil, &MalformedPartHeaderError{Err: err}
 	}
 	bp.r = partReader{bp}
 	return bp, nil

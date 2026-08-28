@@ -634,3 +634,53 @@ func TestWalk_multipart(t *testing.T) {
 		t.Errorf("Entity.Walk() =\n%#v\nbut want:\n%#v", got, want)
 	}
 }
+
+// TestWalk_malformedPartHeader verifies that a part with a single bad header
+// line (no colon) doesn't abort Walk: the recovered part is still visited
+// with a usable header and body, its error verifies IsMalformedPartHeader,
+// and later siblings are still reached.
+func TestWalk_malformedPartHeader(t *testing.T) {
+	raw := "Mime-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=sep\r\n\r\n" +
+		"--sep\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Text part\r\n" +
+		"--sep\r\n" +
+		"X-Notice this line is not a valid header field\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<p>HTML part</p>\r\n" +
+		"--sep\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Trailing part\r\n" +
+		"--sep--\r\n"
+
+	e, err := Read(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Read() = %v", err)
+	}
+
+	got, err := walkCollect(e)
+	if err != nil {
+		t.Fatalf("Entity.Walk() = %v", err)
+	}
+
+	// got[0] is the multipart/mixed root; got[1..3] are its three children.
+	if len(got) != 4 {
+		t.Fatalf("Entity.Walk() visited %d parts, want 4: %#v", len(got), got)
+	}
+
+	if got[2].mediaType != "text/html" || got[2].body != "<p>HTML part</p>" {
+		t.Errorf("recovered part = %#v, want text/html body <p>HTML part</p>", got[2])
+	}
+	if !IsMalformedPartHeader(got[2].err) {
+		t.Errorf("recovered part err = %v, want IsMalformedPartHeader", got[2].err)
+	}
+
+	// The part after the recovered one must still be reached.
+	if got[3].mediaType != "text/plain" || got[3].body != "Trailing part" {
+		t.Errorf("trailing sibling = %#v, want text/plain body Trailing part", got[3])
+	}
+}

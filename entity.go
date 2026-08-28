@@ -235,11 +235,8 @@ func (e *Entity) Walk(walkFunc WalkFunc) error {
 				multipartReaders = multipartReaders[:len(multipartReaders)-1]
 				path = path[:len(path)-1]
 				continue
-			} else if IsUnknownEncoding(err) || IsUnknownCharset(err) {
+			} else if IsUnknownEncoding(err) || IsUnknownCharset(err) || IsMalformedPartHeader(err) {
 				// Forward the error to walkFunc
-			} else if part != nil {
-				// A non-nil part means headers were recovered despite the error;
-				// the part is safe to use, so forward the error rather than failing.
 			} else if err != nil {
 				return err
 			}
