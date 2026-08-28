@@ -917,8 +917,107 @@ func TestInvalidLineAfterBoundary(t *testing.T) {
 	reader := NewMultipartReader(bodyReader, "MyBoundary")
 	_, err := reader.NextPart()
 
-	if err == nil {
-		t.Error("Expected an error when parsing invalid line after boundary, got nil")
+	if !IsMalformedPartHeader(err) {
+		t.Errorf("Expected IsMalformedPartHeader error when parsing invalid line after boundary, got %v", err)
+	}
+}
+
+// TestMalformedPartHeaderRecovery tests that a part with a single bad header
+// line (no colon) followed by valid headers is recovered: the part is non-nil
+// with usable headers (err non-nil), and subsequent parts are parsed normally.
+func TestMalformedPartHeaderRecovery(t *testing.T) {
+	// Mirrors a real-world multipart/alternative where the second part starts
+	// with a line that has no colon before the real headers.
+	body := "--=_ab_5f6e7d\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"Content-Transfer-Encoding: 7bit\r\n" +
+		"\r\n" +
+		"Hi -- thanks for the call earlier.\r\n" +
+		"--=_ab_5f6e7d\r\n" +
+		"X-Notice this line is not a valid header field\r\n" +
+		"Content-Type: text/html; charset=utf-8\r\n" +
+		"Content-Transfer-Encoding: 7bit\r\n" +
+		"\r\n" +
+		"<html><body>phish</body></html>\r\n" +
+		"--=_ab_5f6e7d--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "=_ab_5f6e7d")
+
+	// Part 1: clean text/plain.
+	p, err := r.NextPart()
+	if err != nil {
+		t.Fatalf("part 1 NextPart: %v", err)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), "Hi -- thanks for the call earlier."; got != want {
+		t.Errorf("part 1 body: got %q, want %q", got, want)
+	}
+
+	// Part 2: bad header line, followed by valid headers — part is non-nil (recovered) but err is non-nil.
+	p, err = r.NextPart()
+	if p == nil {
+		t.Fatalf("part 2 NextPart: expected non-nil part with recovered headers, got err %v", err)
+	}
+	if !IsMalformedPartHeader(err) {
+		t.Fatalf("part 2 NextPart: expected IsMalformedPartHeader error, got %v", err)
+	}
+	if got, want := p.Header.Get("Content-Type"), "text/html; charset=utf-8"; got != want {
+		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
+	}
+	b, _ = ioutil.ReadAll(p)
+	if got, want := string(b), "<html><body>phish</body></html>"; got != want {
+		t.Errorf("part 2 body: got %q, want %q", got, want)
+	}
+
+	// No more parts.
+	_, err = r.NextPart()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF after final boundary, got %v", err)
+	}
+}
+
+// TestMalformedPartHeaderSkip tests that when recovery is not possible (two
+// consecutive bad header lines), the bad part is discarded and subsequent
+// valid parts are still returned.
+func TestMalformedPartHeaderSkip(t *testing.T) {
+	body := "--sep\r\n" +
+		"first bad line\r\n" +
+		"second bad line\r\n" +
+		"\r\n" +
+		"skipped body\r\n" +
+		"--sep\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"good body\r\n" +
+		"--sep--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "sep")
+
+	// Part 1: unrecoverable – two bad lines – returns nil part + error.
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) {
+		t.Fatalf("part 1 NextPart: expected IsMalformedPartHeader error, got %v", err)
+	}
+	if p != nil {
+		t.Fatal("part 1 NextPart: expected nil part when recovery fails")
+	}
+
+	// Part 2: valid part is reachable after the skip.
+	p, err = r.NextPart()
+	if err != nil {
+		t.Fatalf("part 2 NextPart: %v", err)
+	}
+	if got, want := p.Header.Get("Content-Type"), "text/plain"; got != want {
+		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), "good body"; got != want {
+		t.Errorf("part 2 body: got %q, want %q", got, want)
+	}
+
+	_, err = r.NextPart()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
 	}
 }
 

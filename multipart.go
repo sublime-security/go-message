@@ -25,10 +25,21 @@ type multipartReader struct {
 // NextPart implements MultipartReader.
 func (r *multipartReader) NextPart() (*Entity, error) {
 	p, err := r.r.NextPart()
-	if err != nil {
+	if err != nil && p == nil {
 		return nil, err
 	}
-	return New(Header{p.Header}, p)
+	e, entityErr := New(Header{p.Header}, p)
+	if entityErr != nil {
+		return e, entityErr
+	}
+	return e, err
+}
+
+// IsMalformedPartHeader reports whether err is due to an unparseable line in
+// a multipart part's header. A non-nil Entity from NextPart alongside it
+// means the headers were recovered and are safe to use.
+func IsMalformedPartHeader(err error) bool {
+	return textproto.IsMalformedPartHeader(err)
 }
 
 // Close implements io.Closer.
