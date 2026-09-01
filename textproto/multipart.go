@@ -124,9 +124,10 @@ func newPart(mr *MultipartReader) (*Part, error) {
 		bp.r = partReader{bp}
 		return bp, err
 	default:
-		// Nothing recoverable (e.g. the very first line was already
-		// malformed). Discard through the part boundary so the reader is
-		// left in a valid state for the next NextPart call.
+		// A genuine reader-level error (never a malformed-line condition:
+		// every such case is a MalformedPartHeaderError caught above).
+		// Discard through the part boundary so the reader is left in a
+		// valid state for the next NextPart call.
 		discard := &Part{mr: mr}
 		discard.r = partReader{discard}
 		io.Copy(io.Discard, discard)
@@ -144,15 +145,15 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 
 	var badLines int
 	var firstErr error
-	var checkpointFields, checkpointRawLen int
+	var checkpointFields int
 
 	// giveUp reports whether a second malformed line has now been seen. The
 	// error is formatted lazily since only the first occurrence is kept.
-	giveUp := func(cf, cr int, format string, args ...any) bool {
+	giveUp := func(cf int, format string, args ...any) bool {
 		badLines++
 		if badLines == 1 {
 			firstErr = fmt.Errorf(format, args...)
-			checkpointFields, checkpointRawLen = cf, cr
+			checkpointFields = cf
 			return false
 		}
 		return true
@@ -169,19 +170,21 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 	for {
 		kv, rerr := readContinuedLineSlice(r)
 		if len(kv) == 0 {
-			if badLines > 0 {
+			// rerr is only non-nil here on a genuine read failure, never a
+			// normal blank line or clean EOF, so it takes priority.
+			if rerr == nil && badLines > 0 {
 				return newHeader(fs), nil, &MalformedPartHeaderError{Err: firstErr}
 			}
 			return newHeader(fs), nil, rerr
 		}
 
-		cf, cr := len(fs), len(raw)
-		raw = append(raw, kv...)
-
 		key, value, perr := parseHeaderFieldLine(kv)
 		if perr != nil {
-			if giveUp(cf, cr, "%w", perr) {
-				return newHeader(fs[:checkpointFields]), raw[checkpointRawLen:], &MalformedPartHeaderError{Err: firstErr}
+			// raw only needs bytes from the first bad line onward: nothing
+			// before checkpointFields is ever part of leftover.
+			raw = append(raw, kv...)
+			if giveUp(len(fs), "%w", perr) {
+				return newHeader(fs[:checkpointFields]), raw, &MalformedPartHeaderError{Err: firstErr}
 			}
 			continue
 		}
@@ -189,6 +192,9 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 			continue
 		}
 
+		if badLines > 0 {
+			raw = append(raw, kv...)
+		}
 		fs = append(fs, newHeaderField(key, value, kv))
 
 		if rerr != nil {

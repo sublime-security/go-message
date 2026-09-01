@@ -7,6 +7,7 @@ package textproto
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -1073,6 +1074,44 @@ func TestMalformedPartHeaderPreservesSubBoundary(t *testing.T) {
 
 	if _, err := inner.NextPart(); err != io.EOF {
 		t.Fatalf("expected io.EOF after inner final boundary, got %v", err)
+	}
+}
+
+// errAfterN returns want, followed by errAfter once want is exhausted.
+type errAfterN struct {
+	want     *strings.Reader
+	errAfter error
+}
+
+func (e *errAfterN) Read(p []byte) (int, error) {
+	if e.want.Len() == 0 {
+		return 0, e.errAfter
+	}
+	return e.want.Read(p)
+}
+
+// TestMalformedPartHeaderIOErrorAfterRecovery tests that a genuine read error
+// after one tolerated bad line is reported, not mistaken for clean recovery.
+func TestMalformedPartHeaderIOErrorAfterRecovery(t *testing.T) {
+	boomErr := errors.New("boom: simulated transport failure")
+	// The last line ends cleanly (trailing CRLF, no partial content left
+	// over), so the read failure surfaces on the *next* attempt to find a
+	// line -- with no bytes read at all, not attached to any line's content.
+	body := "--sep\r\n" +
+		"bad line one\r\n" +
+		"Content-Type: text/plain\r\n"
+
+	r := NewMultipartReader(&errAfterN{want: strings.NewReader(body), errAfter: boomErr}, "sep")
+
+	p, err := r.NextPart()
+	if p != nil {
+		t.Fatalf("NextPart: expected nil part on a genuine I/O error, got %v", p)
+	}
+	if !errors.Is(err, boomErr) {
+		t.Fatalf("NextPart: expected the underlying I/O error to surface, got %v", err)
+	}
+	if IsMalformedPartHeader(err) {
+		t.Fatalf("NextPart: expected a plain I/O error, not IsMalformedPartHeader: %v", err)
 	}
 }
 
