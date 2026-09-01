@@ -97,42 +97,104 @@ func IsMalformedPartHeader(err error) bool {
 
 func newPart(mr *MultipartReader) (*Part, error) {
 	bp := &Part{mr: mr}
-	if err := bp.populateHeaders(); err != nil {
-		// The header block contained at least one unparseable line. ReadHeader
-		// consumed that line and stopped, so the reader is now positioned at
-		// the next line. Try once more: if the remaining lines form a valid
-		// header block (e.g. a single bad line preceded otherwise-valid headers)
-		// we can still deliver the part to the caller.
-		if recoveryErr := bp.populateHeaders(); recoveryErr == nil {
-			// Recovered: part != nil signals the headers are usable.
-			bp.r = partReader{bp}
-			return bp, &MalformedPartHeaderError{Err: err}
-		}
-		// Recovery failed. Discard through the part boundary so the reader is
-		// left in a valid state for the next NextPart call.
-		discard := &Part{mr: mr}
-		discard.r = partReader{discard}
-		io.Copy(io.Discard, discard)
-		// part == nil signals the part was unrecoverable.
-		return nil, &MalformedPartHeaderError{Err: err}
-	}
-	bp.r = partReader{bp}
-	return bp, nil
-}
 
-func (bp *Part) populateHeaders() error {
 	// If there are consecutive boundaries, just return an empty header.
 	peek, _ := bp.mr.bufReader.Peek(len(bp.mr.dashBoundary))
 	if bytes.HasPrefix(peek, bp.mr.dashBoundary) {
 		bp.Header = Header{}
-		return nil
+		bp.r = partReader{bp}
+		return bp, nil
 	}
 
-	header, err := ReadHeader(bp.mr.bufReader)
-	if err == nil {
-		bp.Header = header
+	header, leftover, err := readPartHeader(bp.mr.bufReader)
+	bp.Header = header
+	switch {
+	case err == nil:
+		bp.r = partReader{bp}
+		return bp, nil
+	case leftover != nil:
+		// A recovered multipart Content-Type's boundary is still usable:
+		// folding leftover into the body lets NextPart's own preamble-skip
+		// (partsRead == 0) find the real parts past the garbage.
+		bp.r = io.MultiReader(bytes.NewReader(leftover), partReader{bp})
+		return bp, err
+	case IsMalformedPartHeader(err):
+		// A single bad line, recovered cleanly once the rest of the header
+		// parsed normally.
+		bp.r = partReader{bp}
+		return bp, err
+	default:
+		// Nothing recoverable (e.g. the very first line was already
+		// malformed). Discard through the part boundary so the reader is
+		// left in a valid state for the next NextPart call.
+		discard := &Part{mr: mr}
+		discard.r = partReader{discard}
+		io.Copy(io.Discard, discard)
+		return nil, err
 	}
-	return err
+}
+
+// readPartHeader reads a part's header, tolerating up to one malformed line.
+// A second malformed line rolls the header back to the fields parsed before
+// the first failure; leftover then holds everything consumed from that point
+// onward, for the caller to use instead of losing it.
+func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
+	fs := make([]*headerField, 0, 32)
+	var raw []byte
+
+	var badLines int
+	var firstErr error
+	var checkpointFields, checkpointRawLen int
+
+	// giveUp reports whether a second malformed line has now been seen. The
+	// error is formatted lazily since only the first occurrence is kept.
+	giveUp := func(cf, cr int, format string, args ...any) bool {
+		badLines++
+		if badLines == 1 {
+			firstErr = fmt.Errorf(format, args...)
+			checkpointFields, checkpointRawLen = cf, cr
+			return false
+		}
+		return true
+	}
+
+	if line, err := readHeaderInitialLine(r); err != nil {
+		if line == nil {
+			return newHeader(fs), nil, err
+		}
+		raw = append(raw, line...)
+		badLines, firstErr = 1, err
+	}
+
+	for {
+		kv, rerr := readContinuedLineSlice(r)
+		if len(kv) == 0 {
+			if badLines > 0 {
+				return newHeader(fs), nil, &MalformedPartHeaderError{Err: firstErr}
+			}
+			return newHeader(fs), nil, rerr
+		}
+
+		cf, cr := len(fs), len(raw)
+		raw = append(raw, kv...)
+
+		key, value, perr := parseHeaderFieldLine(kv)
+		if perr != nil {
+			if giveUp(cf, cr, "%w", perr) {
+				return newHeader(fs[:checkpointFields]), raw[checkpointRawLen:], &MalformedPartHeaderError{Err: firstErr}
+			}
+			continue
+		}
+		if key == "" {
+			continue
+		}
+
+		fs = append(fs, newHeaderField(key, value, kv))
+
+		if rerr != nil {
+			return newHeader(fs), nil, rerr
+		}
+	}
 }
 
 // Read reads the body of a part, after its headers and before the

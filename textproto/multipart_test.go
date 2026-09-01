@@ -993,13 +993,21 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 
 	r := NewMultipartReader(strings.NewReader(body), "sep")
 
-	// Part 1: unrecoverable – two bad lines – returns nil part + error.
+	// Part 1: two bad lines, nothing structural recovered -- still returned
+	// (empty Header), with the raw content as its body rather than discarded.
 	p, err := r.NextPart()
 	if !IsMalformedPartHeader(err) {
 		t.Fatalf("part 1 NextPart: expected IsMalformedPartHeader error, got %v", err)
 	}
-	if p != nil {
-		t.Fatal("part 1 NextPart: expected nil part when recovery fails")
+	if p == nil {
+		t.Fatal("part 1 NextPart: expected non-nil part with the unparsed content as its body")
+	}
+	if got := p.Header.Get("Content-Type"); got != "" {
+		t.Errorf("part 1 Content-Type: got %q, want empty", got)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), "first bad line\r\nsecond bad line\r\n\r\nskipped body"; got != want {
+		t.Errorf("part 1 body: got %q, want %q", got, want)
 	}
 
 	// Part 2: valid part is reachable after the skip.
@@ -1010,7 +1018,7 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 	if got, want := p.Header.Get("Content-Type"), "text/plain"; got != want {
 		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
 	}
-	b, _ := ioutil.ReadAll(p)
+	b, _ = ioutil.ReadAll(p)
 	if got, want := string(b), "good body"; got != want {
 		t.Errorf("part 2 body: got %q, want %q", got, want)
 	}
@@ -1018,6 +1026,53 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 	_, err = r.NextPart()
 	if err != io.EOF {
 		t.Fatalf("expected io.EOF, got %v", err)
+	}
+}
+
+// TestMalformedPartHeaderPreservesSubBoundary tests that when a part's own
+// Content-Type (declaring a nested multipart boundary) is followed by two
+// bad lines with no recovery, that boundary isn't thrown away along with the
+// garbage: the nested part reachable through it must still parse normally.
+func TestMalformedPartHeaderPreservesSubBoundary(t *testing.T) {
+	body := "--outer\r\n" +
+		"Content-Type: multipart/mixed; boundary=inner\r\n" +
+		"bad line one\r\n" +
+		"bad line two\r\n" +
+		"--inner\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"real content\r\n" +
+		"--inner--\r\n" +
+		"--outer--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "outer")
+
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) {
+		t.Fatalf("NextPart: expected IsMalformedPartHeader error, got %v", err)
+	}
+	if p == nil {
+		t.Fatal("NextPart: expected non-nil part with the recovered Content-Type")
+	}
+	if got, want := p.Header.Get("Content-Type"), "multipart/mixed; boundary=inner"; got != want {
+		t.Errorf("Content-Type: got %q, want %q", got, want)
+	}
+
+	inner := NewMultipartReader(p, "inner")
+	ip, err := inner.NextPart()
+	if err != nil {
+		t.Fatalf("inner NextPart: %v", err)
+	}
+	if got, want := ip.Header.Get("Content-Type"), "text/plain"; got != want {
+		t.Errorf("inner Content-Type: got %q, want %q", got, want)
+	}
+	b, _ := ioutil.ReadAll(ip)
+	if got, want := string(b), "real content"; got != want {
+		t.Errorf("inner body: got %q, want %q", got, want)
+	}
+
+	if _, err := inner.NextPart(); err != io.EOF {
+		t.Fatalf("expected io.EOF after inner final boundary, got %v", err)
 	}
 }
 
