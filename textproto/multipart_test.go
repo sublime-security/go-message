@@ -7,6 +7,7 @@ package textproto
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -993,13 +994,21 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 
 	r := NewMultipartReader(strings.NewReader(body), "sep")
 
-	// Part 1: unrecoverable – two bad lines – returns nil part + error.
+	// Part 1: two bad lines, nothing structural recovered -- still returned
+	// (empty Header), with the raw content as its body rather than discarded.
 	p, err := r.NextPart()
 	if !IsMalformedPartHeader(err) {
 		t.Fatalf("part 1 NextPart: expected IsMalformedPartHeader error, got %v", err)
 	}
-	if p != nil {
-		t.Fatal("part 1 NextPart: expected nil part when recovery fails")
+	if p == nil {
+		t.Fatal("part 1 NextPart: expected non-nil part with the unparsed content as its body")
+	}
+	if got := p.Header.Get("Content-Type"); got != "" {
+		t.Errorf("part 1 Content-Type: got %q, want empty", got)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), "first bad line\r\nsecond bad line\r\n\r\nskipped body"; got != want {
+		t.Errorf("part 1 body: got %q, want %q", got, want)
 	}
 
 	// Part 2: valid part is reachable after the skip.
@@ -1010,7 +1019,7 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 	if got, want := p.Header.Get("Content-Type"), "text/plain"; got != want {
 		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
 	}
-	b, _ := ioutil.ReadAll(p)
+	b, _ = ioutil.ReadAll(p)
 	if got, want := string(b), "good body"; got != want {
 		t.Errorf("part 2 body: got %q, want %q", got, want)
 	}
@@ -1018,6 +1027,132 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 	_, err = r.NextPart()
 	if err != io.EOF {
 		t.Fatalf("expected io.EOF, got %v", err)
+	}
+}
+
+// TestMalformedPartHeaderPreservesSubBoundary tests that when a part's own
+// Content-Type (declaring a nested multipart boundary) is followed by two
+// bad lines with no recovery, that boundary isn't thrown away along with the
+// garbage: the nested part reachable through it must still parse normally.
+func TestMalformedPartHeaderPreservesSubBoundary(t *testing.T) {
+	body := "--outer\r\n" +
+		"Content-Type: multipart/mixed; boundary=inner\r\n" +
+		"bad line one\r\n" +
+		"bad line two\r\n" +
+		"--inner\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"real content\r\n" +
+		"--inner--\r\n" +
+		"--outer--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "outer")
+
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) {
+		t.Fatalf("NextPart: expected IsMalformedPartHeader error, got %v", err)
+	}
+	if p == nil {
+		t.Fatal("NextPart: expected non-nil part with the recovered Content-Type")
+	}
+	if got, want := p.Header.Get("Content-Type"), "multipart/mixed; boundary=inner"; got != want {
+		t.Errorf("Content-Type: got %q, want %q", got, want)
+	}
+
+	inner := NewMultipartReader(p, "inner")
+	ip, err := inner.NextPart()
+	if err != nil {
+		t.Fatalf("inner NextPart: %v", err)
+	}
+	if got, want := ip.Header.Get("Content-Type"), "text/plain"; got != want {
+		t.Errorf("inner Content-Type: got %q, want %q", got, want)
+	}
+	b, _ := ioutil.ReadAll(ip)
+	if got, want := string(b), "real content"; got != want {
+		t.Errorf("inner body: got %q, want %q", got, want)
+	}
+
+	if _, err := inner.NextPart(); err != io.EOF {
+		t.Fatalf("expected io.EOF after inner final boundary, got %v", err)
+	}
+}
+
+// errAfterN returns want, followed by errAfter once want is exhausted.
+type errAfterN struct {
+	want     *strings.Reader
+	errAfter error
+}
+
+func (e *errAfterN) Read(p []byte) (int, error) {
+	if e.want.Len() == 0 {
+		return 0, e.errAfter
+	}
+	return e.want.Read(p)
+}
+
+// TestMalformedPartHeaderIOErrorAfterRecovery tests that a genuine read error
+// after one tolerated bad line is reported, not mistaken for clean recovery.
+func TestMalformedPartHeaderIOErrorAfterRecovery(t *testing.T) {
+	boomErr := errors.New("boom: simulated transport failure")
+	// The last line ends cleanly (trailing CRLF, no partial content left
+	// over), so the read failure surfaces on the *next* attempt to find a
+	// line -- with no bytes read at all, not attached to any line's content.
+	body := "--sep\r\n" +
+		"bad line one\r\n" +
+		"Content-Type: text/plain\r\n"
+
+	r := NewMultipartReader(&errAfterN{want: strings.NewReader(body), errAfter: boomErr}, "sep")
+
+	p, err := r.NextPart()
+	if p != nil {
+		t.Fatalf("NextPart: expected nil part on a genuine I/O error, got %v", p)
+	}
+	if !errors.Is(err, boomErr) {
+		t.Fatalf("NextPart: expected the underlying I/O error to surface, got %v", err)
+	}
+	if IsMalformedPartHeader(err) {
+		t.Fatalf("NextPart: expected a plain I/O error, not IsMalformedPartHeader: %v", err)
+	}
+}
+
+// TestMalformedPartHeaderInitialLinePreservesLineEnding tests that a bad
+// first line (starting with a space) doesn't run straight into the next
+// line once recovered.
+func TestMalformedPartHeaderInitialLinePreservesLineEnding(t *testing.T) {
+	body := "--sep\r\n" +
+		" initial bad line\r\n" +
+		"second bad line\r\n" +
+		"--sep--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "sep")
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) || p == nil {
+		t.Fatalf("NextPart: expected a recovered part with IsMalformedPartHeader, got p=%v err=%v", p, err)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), " initial bad line\r\nsecond bad line\r\n"; got != want {
+		t.Errorf("body: got %q, want %q", got, want)
+	}
+}
+
+// TestMalformedPartHeaderPreservesEmptyKeyLine tests that a colon-only line
+// (empty field name) occurring after the first bad line isn't silently
+// dropped from the recovered body if a second bad line forces a rollback.
+func TestMalformedPartHeaderPreservesEmptyKeyLine(t *testing.T) {
+	body := "--sep\r\n" +
+		"bad line one\r\n" +
+		": emptykey\r\n" +
+		"second bad line\r\n" +
+		"--sep--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "sep")
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) || p == nil {
+		t.Fatalf("NextPart: expected a recovered part with IsMalformedPartHeader, got p=%v err=%v", p, err)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), "bad line one\r\n: emptykey\r\nsecond bad line\r\n"; got != want {
+		t.Errorf("body: got %q, want %q", got, want)
 	}
 }
 
