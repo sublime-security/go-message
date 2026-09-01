@@ -163,7 +163,10 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 		if line == nil {
 			return newHeader(fs), nil, err
 		}
+		// readLineSlice strips the line ending; restore it so this doesn't
+		// run into a following line (e.g. a nested boundary needing its own).
 		raw = append(raw, line...)
+		raw = append(raw, '\r', '\n')
 		badLines, firstErr = 1, err
 	}
 
@@ -188,12 +191,11 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 			}
 			continue
 		}
-		if key == "" {
-			continue
-		}
-
 		if badLines > 0 {
 			raw = append(raw, kv...)
+		}
+		if key == "" {
+			continue
 		}
 		fs = append(fs, newHeaderField(key, value, kv))
 

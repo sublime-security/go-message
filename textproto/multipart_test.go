@@ -1115,6 +1115,47 @@ func TestMalformedPartHeaderIOErrorAfterRecovery(t *testing.T) {
 	}
 }
 
+// TestMalformedPartHeaderInitialLinePreservesLineEnding tests that a bad
+// first line (starting with a space) doesn't run straight into the next
+// line once recovered.
+func TestMalformedPartHeaderInitialLinePreservesLineEnding(t *testing.T) {
+	body := "--sep\r\n" +
+		" initial bad line\r\n" +
+		"second bad line\r\n" +
+		"--sep--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "sep")
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) || p == nil {
+		t.Fatalf("NextPart: expected a recovered part with IsMalformedPartHeader, got p=%v err=%v", p, err)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), " initial bad line\r\nsecond bad line\r\n"; got != want {
+		t.Errorf("body: got %q, want %q", got, want)
+	}
+}
+
+// TestMalformedPartHeaderPreservesEmptyKeyLine tests that a colon-only line
+// (empty field name) occurring after the first bad line isn't silently
+// dropped from the recovered body if a second bad line forces a rollback.
+func TestMalformedPartHeaderPreservesEmptyKeyLine(t *testing.T) {
+	body := "--sep\r\n" +
+		"bad line one\r\n" +
+		": emptykey\r\n" +
+		"second bad line\r\n" +
+		"--sep--\r\n"
+
+	r := NewMultipartReader(strings.NewReader(body), "sep")
+	p, err := r.NextPart()
+	if !IsMalformedPartHeader(err) || p == nil {
+		t.Fatalf("NextPart: expected a recovered part with IsMalformedPartHeader, got p=%v err=%v", p, err)
+	}
+	b, _ := ioutil.ReadAll(p)
+	if got, want := string(b), "bad line one\r\n: emptykey\r\nsecond bad line\r\n"; got != want {
+		t.Errorf("body: got %q, want %q", got, want)
+	}
+}
+
 // TestMatchAfterPrefix exercises all return paths of matchAfterPrefix, including
 // the new single-hyphen lookahead added to distinguish --boundary-- from --boundary-X.
 func TestMatchAfterPrefix(t *testing.T) {
