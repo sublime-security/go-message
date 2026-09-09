@@ -518,6 +518,49 @@ func trimAroundNewlines(v []byte) string {
 	return b.String()
 }
 
+// readHeaderInitialLine rejects a header block starting with a continuation
+// line (leading whitespace), which has no preceding field to fold onto. A
+// nil line means the header doesn't start this way; otherwise line holds the
+// offending line's raw bytes, or nil if reading it failed outright.
+func readHeaderInitialLine(r *bufio.Reader) (line []byte, err error) {
+	buf, peekErr := r.Peek(1)
+	if peekErr != nil || !isSpace(buf[0]) {
+		return nil, nil
+	}
+
+	line, err = readLineSlice(r, nil)
+	if err != nil {
+		return nil, err
+	}
+	return line, fmt.Errorf("message: malformed MIME header initial line: %v", string(line))
+}
+
+// parseHeaderFieldLine parses a raw header line (from readContinuedLineSlice)
+// into a canonical key/value pair. key is "" for an empty field name, which
+// callers should skip rather than treat as an error.
+func parseHeaderFieldLine(kv []byte) (key, value string, err error) {
+	// Key ends at first colon; should not have trailing spaces but they
+	// appear in the wild, violating specs, so we remove them if present.
+	i := bytes.IndexByte(kv, ':')
+	if i < 0 {
+		return "", "", fmt.Errorf("message: malformed MIME header line: %v", string(kv))
+	}
+
+	keyBytes := trim(kv[:i])
+
+	// Verify that there are no invalid characters in the header key.
+	// See RFC 5322 Section 2.2
+	for _, c := range keyBytes {
+		if !validHeaderKeyByte(c) {
+			return "", "", fmt.Errorf("message: malformed MIME header key: %v", string(keyBytes))
+		}
+	}
+
+	key = textproto.CanonicalMIMEHeaderKey(string(keyBytes))
+	value = trimAroundNewlines(kv[i+1:])
+	return key, value, nil
+}
+
 // ReadHeader reads a MIME header from r. The header is a sequence of possibly
 // continued "Key: Value" lines ending in a blank line.
 //
@@ -527,14 +570,8 @@ func trimAroundNewlines(v []byte) string {
 func ReadHeader(r *bufio.Reader) (Header, error) {
 	fs := make([]*headerField, 0, 32)
 
-	// The first line cannot start with a leading space.
-	if buf, err := r.Peek(1); err == nil && isSpace(buf[0]) {
-		line, err := readLineSlice(r, nil)
-		if err != nil {
-			return newHeader(fs), err
-		}
-
-		return newHeader(fs), fmt.Errorf("message: malformed MIME header initial line: %v", string(line))
+	if _, err := readHeaderInitialLine(r); err != nil {
+		return newHeader(fs), err
 	}
 
 	for {
@@ -543,24 +580,10 @@ func ReadHeader(r *bufio.Reader) (Header, error) {
 			return newHeader(fs), err
 		}
 
-		// Key ends at first colon; should not have trailing spaces but they
-		// appear in the wild, violating specs, so we remove them if present.
-		i := bytes.IndexByte(kv, ':')
-		if i < 0 {
-			return newHeader(fs), fmt.Errorf("message: malformed MIME header line: %v", string(kv))
+		key, value, perr := parseHeaderFieldLine(kv)
+		if perr != nil {
+			return newHeader(fs), perr
 		}
-
-		keyBytes := trim(kv[:i])
-
-		// Verify that there are no invalid characters in the header key.
-		// See RFC 5322 Section 2.2
-		for _, c := range keyBytes {
-			if !validHeaderKeyByte(c) {
-				return newHeader(fs), fmt.Errorf("message: malformed MIME header key: %v", string(keyBytes))
-			}
-		}
-
-		key := textproto.CanonicalMIMEHeaderKey(string(keyBytes))
 
 		// As per RFC 7230 field-name is a token, tokens consist of one or more
 		// chars. We could return a an error here, but better to be liberal in
@@ -569,10 +592,6 @@ func ReadHeader(r *bufio.Reader) (Header, error) {
 			continue
 		}
 
-		i++ // skip colon
-		v := kv[i:]
-
-		value := trimAroundNewlines(v)
 		fs = append(fs, newHeaderField(key, value, kv))
 
 		if err != nil {
