@@ -71,7 +71,10 @@ func deduplicateContentTypeParams(s string) string {
 			end := 1
 			for end < len(rest) {
 				if rest[end] == '\\' {
-					end += 2
+					end++
+					if end < len(rest) {
+						end++
+					}
 				} else if rest[end] == '"' {
 					end++
 					break
@@ -123,7 +126,10 @@ func deduplicateContentTypeParams(s string) string {
 			end := 1
 			for end < len(rest) {
 				if rest[end] == '\\' {
-					end += 2
+					end++
+					if end < len(rest) {
+						end++
+					}
 				} else if rest[end] == '"' {
 					end++
 					break
