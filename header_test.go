@@ -2,6 +2,7 @@ package message
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -150,6 +151,37 @@ func TestContentTypeDuplicateParamRecovery(t *testing.T) {
 			t.Errorf("expected boundary %q, got %q", "abc", params["boundary"])
 		}
 	})
+}
+
+func TestContentTypeUnterminatedQuotedParam(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{
+			name:        "without duplicate param",
+			contentType: `multipart/mixed; boundary=abc; name="` + strings.Repeat("A", 72) + `\`,
+		},
+		{
+			name:        "after duplicate param",
+			contentType: `multipart/mixed; boundary=abc; boundary=xyz; name="` + strings.Repeat("A", 72) + `\`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var h Header
+			h.Set("Content-Type", tc.contentType)
+
+			_, params, err := h.ContentType()
+			if err == nil {
+				t.Error("expected non-nil error for malformed header")
+			}
+			if params != nil {
+				t.Errorf("expected nil params for unrecoverable header, got %v", params)
+			}
+		})
+	}
 }
 
 func TestUnknownCharset(t *testing.T) {
