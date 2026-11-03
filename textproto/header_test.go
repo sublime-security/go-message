@@ -3,6 +3,7 @@ package textproto
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
@@ -569,5 +570,29 @@ func TestHeader_Map(t *testing.T) {
 	m := h.Map()
 	if !reflect.DeepEqual(m, want) {
 		t.Errorf("Fields(): got \n%#v\n but want \n%#v", m, want)
+	}
+}
+
+func TestReadHeader_malformedHeaderError(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want MalformedHeaderError
+	}{
+		{"initial line", " folded\r\nA: b\r\n\r\n", MalformedHeaderError{MalformedInitialLine, 0}},
+		{"no colon", "A: b\nbogus line\n\n", MalformedHeaderError{MalformedLine, 5}},
+		{"bad key", "A: b\r\nK\x01y: v\r\n\r\n", MalformedHeaderError{MalformedKey, 6}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ReadHeader(bufio.NewReader(strings.NewReader(tc.in)))
+			var got *MalformedHeaderError
+			if !errors.As(err, &got) {
+				t.Fatalf("ReadHeader() = %v, want *MalformedHeaderError", err)
+			}
+			if *got != tc.want {
+				t.Errorf("got %+v, want %+v", *got, tc.want)
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package textproto
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/textproto"
@@ -408,20 +409,31 @@ func (h *Header) FieldsByKey(k string) HeaderFields {
 	return &headerFieldsByKey{h, textproto.CanonicalMIMEHeaderKey(k), -1}
 }
 
-func readLineSlice(r *bufio.Reader, line []byte) ([]byte, error) {
+// readLineSlice appends the next line, minus its ending, to line and advances
+// *off by the bytes consumed.
+func readLineSlice(r *bufio.Reader, line []byte, off *int) ([]byte, error) {
+	start := len(line)
 	for {
-		l, more, err := r.ReadLine()
+		l, err := r.ReadSlice('\n')
+		*off += len(l)
 		line = append(line, l...)
-		if err != nil {
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if len(line) == start {
 			return line, err
 		}
-
-		if !more {
-			break
+		if line[len(line)-1] == '\n' {
+			line = line[:len(line)-1]
+			if len(line) > start && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
 		}
+		if err == io.EOF {
+			err = nil
+		}
+		return line, err
 	}
-
-	return line, nil
 }
 
 func isSpace(c byte) bool {
@@ -456,10 +468,10 @@ func hasContinuationLine(r *bufio.Reader) bool {
 	return isSpace(c)
 }
 
-func readContinuedLineSlice(r *bufio.Reader) ([]byte, error) {
+func readContinuedLineSlice(r *bufio.Reader, off *int) ([]byte, error) {
 	// Read the first line. We preallocate slice that it enough
 	// for most fields.
-	line, err := readLineSlice(r, make([]byte, 0, 256))
+	line, err := readLineSlice(r, make([]byte, 0, 256), off)
 	if err == io.EOF && len(line) == 0 {
 		// Header without a body
 		return nil, nil
@@ -475,7 +487,7 @@ func readContinuedLineSlice(r *bufio.Reader) ([]byte, error) {
 
 	// Read continuation lines.
 	for hasContinuationLine(r) {
-		line, err = readLineSlice(r, line)
+		line, err = readLineSlice(r, line, off)
 		if err != nil {
 			break // bufio will keep err until next read.
 		}
@@ -518,32 +530,75 @@ func trimAroundNewlines(v []byte) string {
 	return b.String()
 }
 
+// MalformedHeaderKind is the class of a MalformedHeaderError.
+type MalformedHeaderKind int
+
+const (
+	// MalformedInitialLine is a header block starting with a continuation line.
+	MalformedInitialLine MalformedHeaderKind = iota
+	// MalformedLine is a header line with no colon.
+	MalformedLine
+	// MalformedKey is a header key with an invalid character.
+	MalformedKey
+)
+
+func (k MalformedHeaderKind) String() string {
+	switch k {
+	case MalformedInitialLine:
+		return "initial line"
+	case MalformedLine:
+		return "line"
+	case MalformedKey:
+		return "key"
+	}
+	return "unknown"
+}
+
+// MalformedHeaderError is a syntax error in a MIME header.
+type MalformedHeaderError struct {
+	Kind MalformedHeaderKind
+	// Offset is the byte offset in the header block of the offending line or key.
+	Offset int
+}
+
+func (e *MalformedHeaderError) Error() string {
+	return fmt.Sprintf("message: malformed MIME header %v at offset %v", e.Kind, e.Offset)
+}
+
+// IsMalformedHeader reports whether err is a MalformedHeaderError.
+func IsMalformedHeader(err error) bool {
+	_, ok := errors.AsType[*MalformedHeaderError](err)
+	return ok
+}
+
 // readHeaderInitialLine rejects a header block starting with a continuation
 // line (leading whitespace), which has no preceding field to fold onto. A
 // nil line means the header doesn't start this way; otherwise line holds the
 // offending line's raw bytes, or nil if reading it failed outright.
-func readHeaderInitialLine(r *bufio.Reader) (line []byte, err error) {
+func readHeaderInitialLine(r *bufio.Reader, off *int) (line []byte, err error) {
 	buf, peekErr := r.Peek(1)
 	if peekErr != nil || !isSpace(buf[0]) {
 		return nil, nil
 	}
 
-	line, err = readLineSlice(r, nil)
+	start := *off
+	line, err = readLineSlice(r, nil, off)
 	if err != nil {
 		return nil, err
 	}
-	return line, fmt.Errorf("message: malformed MIME header initial line: %v", string(line))
+	return line, &MalformedHeaderError{Kind: MalformedInitialLine, Offset: start}
 }
 
 // parseHeaderFieldLine parses a raw header line (from readContinuedLineSlice)
 // into a canonical key/value pair. key is "" for an empty field name, which
-// callers should skip rather than treat as an error.
-func parseHeaderFieldLine(kv []byte) (key, value string, err error) {
+// callers should skip rather than treat as an error. off is the line's offset
+// in the header block.
+func parseHeaderFieldLine(kv []byte, off int) (key, value string, err error) {
 	// Key ends at first colon; should not have trailing spaces but they
 	// appear in the wild, violating specs, so we remove them if present.
 	i := bytes.IndexByte(kv, ':')
 	if i < 0 {
-		return "", "", fmt.Errorf("message: malformed MIME header line: %v", string(kv))
+		return "", "", &MalformedHeaderError{Kind: MalformedLine, Offset: off}
 	}
 
 	keyBytes := trim(kv[:i])
@@ -552,7 +607,11 @@ func parseHeaderFieldLine(kv []byte) (key, value string, err error) {
 	// See RFC 5322 Section 2.2
 	for _, c := range keyBytes {
 		if !validHeaderKeyByte(c) {
-			return "", "", fmt.Errorf("message: malformed MIME header key: %v", string(keyBytes))
+			lead := 0
+			for lead < i && isSpace(kv[lead]) {
+				lead++
+			}
+			return "", "", &MalformedHeaderError{Kind: MalformedKey, Offset: off + lead}
 		}
 	}
 
@@ -570,17 +629,19 @@ func parseHeaderFieldLine(kv []byte) (key, value string, err error) {
 func ReadHeader(r *bufio.Reader) (Header, error) {
 	fs := make([]*headerField, 0, 32)
 
-	if _, err := readHeaderInitialLine(r); err != nil {
+	var off int
+	if _, err := readHeaderInitialLine(r, &off); err != nil {
 		return newHeader(fs), err
 	}
 
 	for {
-		kv, err := readContinuedLineSlice(r)
+		lineOff := off
+		kv, err := readContinuedLineSlice(r, &off)
 		if len(kv) == 0 {
 			return newHeader(fs), err
 		}
 
-		key, value, perr := parseHeaderFieldLine(kv)
+		key, value, perr := parseHeaderFieldLine(kv, lineOff)
 		if perr != nil {
 			return newHeader(fs), perr
 		}
