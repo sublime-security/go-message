@@ -586,8 +586,8 @@ func TestReadHeader_malformedHeaderError(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ReadHeader(bufio.NewReader(strings.NewReader(tc.in)))
-			var got *MalformedHeaderError
-			if !errors.As(err, &got) {
+			got, ok := errors.AsType[*MalformedHeaderError](err)
+			if !ok {
 				t.Fatalf("ReadHeader() = %v, want *MalformedHeaderError", err)
 			}
 			if *got != tc.want {
