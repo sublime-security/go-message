@@ -2,10 +2,13 @@ package charset
 
 import (
 	"bytes"
+	"errors"
 	"io"
 
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/htmlindex"
 )
 
 var testCharsets = []struct {
@@ -119,5 +122,18 @@ func TestDisabledCharsetWriter(t *testing.T) {
 	_, err := Writer("DISABLED", buf)
 	if err == nil {
 		t.Errorf("Writer(): expected disabled charset to return an error")
+	}
+}
+
+func TestUnknownCharsetWrapsCause(t *testing.T) {
+	const name = "no-such-charset"
+	_, want := htmlindex.Get(name)
+	if want == nil {
+		t.Fatalf("htmlindex.Get(%q): expected an error", name)
+	}
+
+	_, err := charsetEncoding(name)
+	if !errors.Is(err, want) {
+		t.Errorf("charsetEncoding(%q) = %v, want an error wrapping %v", name, err, want)
 	}
 }
