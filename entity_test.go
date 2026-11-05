@@ -173,7 +173,7 @@ func TestRead_single(t *testing.T) {
 
 	b, err := io.ReadAll(e.Body)
 	if err != nil {
-		t.Fatalf("ioutil.ReadAll() = %v", err)
+		t.Fatalf("io.ReadAll() = %v", err)
 	}
 
 	expected := "Message body"
