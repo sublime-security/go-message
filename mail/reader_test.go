@@ -2,7 +2,6 @@ package mail_test
 
 import (
 	"io"
-	"io/ioutil"
 	"log"
 	"strings"
 	"testing"
@@ -31,7 +30,7 @@ func ExampleReader() {
 
 		switch h := p.Header.(type) {
 		case *mail.InlineHeader:
-			b, _ := ioutil.ReadAll(p.Body)
+			b, _ := io.ReadAll(p.Body)
 			log.Printf("Got text: %v\n", string(b))
 		case *mail.AttachmentHeader:
 			filename, _ := h.Filename()
@@ -92,7 +91,7 @@ func testReader(t *testing.T, r io.Reader) {
 			expectedBody = "I'm Mitsuha."
 		}
 
-		if b, err := ioutil.ReadAll(p.Body); err != nil {
+		if b, err := io.ReadAll(p.Body); err != nil {
 			t.Error("Expected no error while reading part body, but got:", err)
 		} else if string(b) != expectedBody {
 			t.Errorf("Expected part body to be:\n%v\nbut got:\n%v", expectedBody, string(b))
@@ -131,7 +130,7 @@ func TestReader_nonMultipart(t *testing.T) {
 	}
 
 	expectedBody := "Who are you?"
-	if b, err := ioutil.ReadAll(p.Body); err != nil {
+	if b, err := io.ReadAll(p.Body); err != nil {
 		t.Error("Expected no error while reading part body, but got:", err)
 	} else if string(b) != expectedBody {
 		t.Errorf("Expected part body to be:\n%v\nbut got:\n%v", expectedBody, string(b))
@@ -185,7 +184,7 @@ func TestReader_nested(t *testing.T) {
 			}
 
 			expectedBody := "I forgot."
-			if b, err := ioutil.ReadAll(p.Body); err != nil {
+			if b, err := io.ReadAll(p.Body); err != nil {
 				t.Error("Expected no error while reading part body, but got:", err)
 			} else if string(b) != expectedBody {
 				t.Errorf("Expected part body to be:\n%v\nbut got:\n%v", expectedBody, string(b))

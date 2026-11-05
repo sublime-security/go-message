@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/textproto"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -201,8 +202,8 @@ func (h *Header) Del(k string) {
 	delete(h.m, k)
 
 	// Delete existing keys
-	for i := len(h.l) - 1; i >= 0; i-- {
-		if h.l[i].k == k {
+	for i, v := range slices.Backward(h.l) {
+		if v.k == k {
 			h.l = append(h.l[:i], h.l[i+1:]...)
 		}
 	}
@@ -747,8 +748,7 @@ func formatHeaderField(k, v string) string {
 
 // WriteHeader writes a MIME header to w.
 func WriteHeader(w io.Writer, h Header) error {
-	for i := len(h.l) - 1; i >= 0; i-- {
-		f := h.l[i]
+	for i, f := range slices.Backward(h.l) {
 		if rawField, err := f.raw(); err == nil {
 			if _, err := w.Write(rawField); err != nil {
 				return err

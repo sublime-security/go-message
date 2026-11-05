@@ -3,7 +3,7 @@ package charset
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
+
 	"strings"
 	"testing"
 )
@@ -70,7 +70,7 @@ func TestCharsetReader(t *testing.T) {
 		if test.decoded != "" {
 			if err != nil {
 				t.Errorf("Expected no error when creating reader for charset %q, but got: %v", test.charset, err)
-			} else if b, err := ioutil.ReadAll(r); err != nil {
+			} else if b, err := io.ReadAll(r); err != nil {
 				t.Errorf("Expected no error when reading charset %q, but got: %v", test.charset, err)
 			} else if s := string(b); s != test.decoded {
 				t.Errorf("Expected decoded text to be %q but got %q", test.decoded, s)

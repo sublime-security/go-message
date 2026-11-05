@@ -3,7 +3,7 @@ package message
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
+
 	"strings"
 	"testing"
 )
@@ -45,7 +45,7 @@ func TestDecode(t *testing.T) {
 		r, err := encodingReader(test.enc, strings.NewReader(test.encoded))
 		if err != nil {
 			t.Errorf("Expected no error when creating decoder for encoding %q, but got: %v", test.enc, err)
-		} else if b, err := ioutil.ReadAll(r); err != nil {
+		} else if b, err := io.ReadAll(r); err != nil {
 			t.Errorf("Expected no error when reading encoding %q, but got: %v", test.enc, err)
 		} else if s := string(b); s != test.decoded {
 			t.Errorf("Expected decoded text to be %q but got %q", test.decoded, s)

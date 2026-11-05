@@ -78,7 +78,7 @@ type whitespaceReplacingReader struct {
 func (r *whitespaceReplacingReader) Read(p []byte) (int, error) {
 	n, err := r.wrapped.Read(p)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if p[i] == ' ' || p[i] == '\t' {
 			p[i] = '\n'
 		}
@@ -141,7 +141,7 @@ func (w *lineWrapper) Write(b []byte) (int, error) {
 }
 
 func cutLine(b []byte, max int) ([]byte, []byte) {
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if b[i] == '\r' && i == max {
 			continue
 		}

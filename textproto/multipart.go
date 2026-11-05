@@ -241,10 +241,7 @@ func (pr partReader) Read(d []byte) (int, error) {
 	if p.n == 0 {
 		return 0, p.err
 	}
-	n := len(d)
-	if n > p.n {
-		n = p.n
-	}
+	n := min(len(d), p.n)
 	n, _ = br.Read(d[:n])
 	p.total += int64(n)
 	p.n -= n
