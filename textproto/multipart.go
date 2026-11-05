@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 )
 
 var emptyParams = make(map[string]string)
@@ -345,7 +344,7 @@ func matchAfterPrefix(buf, prefix []byte, readErr error) int {
 }
 
 func (p *Part) Close() error {
-	io.Copy(ioutil.Discard, p)
+	io.Copy(io.Discard, p)
 	return nil
 }
 
@@ -386,6 +385,7 @@ func (r *MultipartReader) NextPart() (*Part, error) {
 			return nil, io.EOF
 		}
 		if err != nil {
+			// %v, not %w: wrapping would make a truncated body satisfy errors.Is(err, io.EOF).
 			return nil, fmt.Errorf("multipart: NextPart: %v", err)
 		}
 
