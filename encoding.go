@@ -102,8 +102,7 @@ func (w *lineWrapper) Write(b []byte) (int, error) {
 		var l []byte
 		l, b = cutLine(b, w.maxLineLen-w.curLineLen)
 
-		lf := bytes.HasSuffix(l, []byte("\n"))
-		l = bytes.TrimSuffix(l, []byte("\n"))
+		l, lf := bytes.CutSuffix(l, []byte("\n"))
 
 		n, err := w.w.Write(l)
 		if err != nil {

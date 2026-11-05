@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/textproto"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -94,8 +93,8 @@ func HeaderFromMap(m map[string][]string) Header {
 		}
 	}
 
-	sort.SliceStable(fs, func(i, j int) bool {
-		return fs[i].k < fs[j].k
+	slices.SortStableFunc(fs, func(a, b *headerField) int {
+		return strings.Compare(a.k, b.k)
 	})
 
 	return newHeader(fs)
@@ -111,12 +110,12 @@ func HeaderFromMap(m map[string][]string) Header {
 // kv is directly added to the underlying structure and therefore should not be
 // modified after the AddRaw call.
 func (h *Header) AddRaw(kv []byte) {
-	colon := bytes.IndexByte(kv, ':')
-	if colon == -1 {
+	rawKey, rawValue, ok := bytes.Cut(kv, []byte(":"))
+	if !ok {
 		panic("textproto: Header.AddRaw: missing colon")
 	}
-	k := textproto.CanonicalMIMEHeaderKey(string(trim(kv[:colon])))
-	v := trimAroundNewlines(kv[colon+1:])
+	k := textproto.CanonicalMIMEHeaderKey(string(trim(rawKey)))
+	v := trimAroundNewlines(rawValue)
 
 	if h.m == nil {
 		h.m = make(map[string][]*headerField)
@@ -519,13 +518,12 @@ func trimAroundNewlines(v []byte) string {
 	var b strings.Builder
 	b.Grow(len(v))
 	for {
-		i := bytes.IndexByte(v, '\n')
-		if i < 0 {
-			writeContinued(&b, v)
+		line, rest, found := bytes.Cut(v, []byte("\n"))
+		writeContinued(&b, line)
+		if !found {
 			break
 		}
-		writeContinued(&b, v[:i])
-		v = v[i+1:]
+		v = rest
 	}
 
 	return b.String()
@@ -597,19 +595,19 @@ func readHeaderInitialLine(r *bufio.Reader, off *int) (line []byte, err error) {
 func parseHeaderFieldLine(kv []byte, off int) (key, value string, err error) {
 	// Key ends at first colon; should not have trailing spaces but they
 	// appear in the wild, violating specs, so we remove them if present.
-	i := bytes.IndexByte(kv, ':')
-	if i < 0 {
+	rawKey, rawValue, ok := bytes.Cut(kv, []byte(":"))
+	if !ok {
 		return "", "", &MalformedHeaderError{Kind: MalformedLine, Offset: off}
 	}
 
-	keyBytes := trim(kv[:i])
+	keyBytes := trim(rawKey)
 
 	// Verify that there are no invalid characters in the header key.
 	// See RFC 5322 Section 2.2
 	for _, c := range keyBytes {
 		if !validHeaderKeyByte(c) {
 			lead := 0
-			for lead < i && isSpace(kv[lead]) {
+			for lead < len(rawKey) && isSpace(kv[lead]) {
 				lead++
 			}
 			return "", "", &MalformedHeaderError{Kind: MalformedKey, Offset: off + lead}
@@ -617,7 +615,7 @@ func parseHeaderFieldLine(kv []byte, off int) (key, value string, err error) {
 	}
 
 	key = textproto.CanonicalMIMEHeaderKey(string(keyBytes))
-	value = trimAroundNewlines(kv[i+1:])
+	value = trimAroundNewlines(rawValue)
 	return key, value, nil
 }
 
