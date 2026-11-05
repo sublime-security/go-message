@@ -24,7 +24,8 @@ func (u UnknownEncodingError) Error() string {
 // IsUnknownEncoding returns a boolean indicating whether the error is known to
 // report that the encoding advertised by the entity is unknown.
 func IsUnknownEncoding(err error) bool {
-	return errors.As(err, new(UnknownEncodingError))
+	_, ok := errors.AsType[UnknownEncodingError](err)
+	return ok
 }
 
 func encodingReader(enc string, r io.Reader) (io.Reader, error) {
