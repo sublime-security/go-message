@@ -49,7 +49,7 @@ func charsetEncoding(charset string) (encoding.Encoding, error) {
 		enc, err = htmlindex.Get(charset)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("charset %q: %v", charset, err)
+		return nil, fmt.Errorf("charset %q: %w", charset, err)
 	}
 	// See https://github.com/golang/go/issues/19421
 	if enc == nil {

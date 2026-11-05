@@ -203,7 +203,7 @@ func (h *Header) Del(k string) {
 	// Delete existing keys
 	for i, v := range slices.Backward(h.l) {
 		if v.k == k {
-			h.l = append(h.l[:i], h.l[i+1:]...)
+			h.l = slices.Delete(h.l, i, i+1)
 		}
 	}
 }
@@ -311,7 +311,7 @@ func (fs *headerFields) Del() {
 	for i, ff := range fs.h.m[f.k] {
 		if ff == f {
 			ok = true
-			fs.h.m[f.k] = append(fs.h.m[f.k][:i], fs.h.m[f.k][i+1:]...)
+			fs.h.m[f.k] = slices.Delete(fs.h.m[f.k], i, i+1)
 			if len(fs.h.m[f.k]) == 0 {
 				delete(fs.h.m, f.k)
 			}
@@ -322,7 +322,7 @@ func (fs *headerFields) Del() {
 		panic("message: field not found in Header.m")
 	}
 
-	fs.h.l = append(fs.h.l[:fs.index()], fs.h.l[fs.index()+1:]...)
+	fs.h.l = slices.Delete(fs.h.l, fs.index(), fs.index()+1)
 	fs.cur--
 }
 
@@ -383,7 +383,7 @@ func (fs *headerFieldsByKey) Del() {
 	for i := range fs.h.l {
 		if f == fs.h.l[i] {
 			ok = true
-			fs.h.l = append(fs.h.l[:i], fs.h.l[i+1:]...)
+			fs.h.l = slices.Delete(fs.h.l, i, i+1)
 			break
 		}
 	}
@@ -391,7 +391,7 @@ func (fs *headerFieldsByKey) Del() {
 		panic("message: field not found in Header.l")
 	}
 
-	fs.h.m[fs.k] = append(fs.h.m[fs.k][:fs.index()], fs.h.m[fs.k][fs.index()+1:]...)
+	fs.h.m[fs.k] = slices.Delete(fs.h.m[fs.k], fs.index(), fs.index()+1)
 	if len(fs.h.m[fs.k]) == 0 {
 		delete(fs.h.m, fs.k)
 	}

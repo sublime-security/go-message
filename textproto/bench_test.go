@@ -228,7 +228,7 @@ func BenchmarkTextprotoReadHeader(b *testing.B) {
 			r := bufio.NewReader(strings.NewReader(blob))
 
 			var err error
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				r.Reset(strings.NewReader(blob))
 				hdr, err = ReadHeader(r)
 				if err != nil {
@@ -254,7 +254,7 @@ func BenchmarkStdlibReadHeader(b *testing.B) {
 			tr := textproto.NewReader(r)
 
 			var err error
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				r.Reset(strings.NewReader(blob))
 				mimeHdr, err = tr.ReadMIMEHeader()
 				if err != nil {

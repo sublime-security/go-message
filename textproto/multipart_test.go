@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/textproto"
 	"reflect"
 	"strings"
@@ -284,7 +283,7 @@ Oh no, premature EOF!
 	if err != nil {
 		t.Fatalf("didn't get a part")
 	}
-	_, err = io.Copy(ioutil.Discard, part)
+	_, err = io.Copy(io.Discard, part)
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected error io.ErrUnexpectedEOF; got %v", err)
 	}
