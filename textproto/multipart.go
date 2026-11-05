@@ -91,8 +91,8 @@ func (e *MalformedPartHeaderError) Unwrap() error {
 
 // IsMalformedPartHeader reports whether err is a MalformedPartHeaderError.
 func IsMalformedPartHeader(err error) bool {
-	var e *MalformedPartHeaderError
-	return errors.As(err, &e)
+	_, ok := errors.AsType[*MalformedPartHeaderError](err)
+	return ok
 }
 
 func newPart(mr *MultipartReader) (*Part, error) {
@@ -159,7 +159,8 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 		return true
 	}
 
-	if line, err := readHeaderInitialLine(r); err != nil {
+	var off int
+	if line, err := readHeaderInitialLine(r, &off); err != nil {
 		if line == nil {
 			return newHeader(fs), nil, err
 		}
@@ -171,7 +172,8 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 	}
 
 	for {
-		kv, rerr := readContinuedLineSlice(r)
+		lineOff := off
+		kv, rerr := readContinuedLineSlice(r, &off)
 		if len(kv) == 0 {
 			// rerr is only non-nil here on a genuine read failure, never a
 			// normal blank line or clean EOF, so it takes priority.
@@ -181,7 +183,7 @@ func readPartHeader(r *bufio.Reader) (h Header, leftover []byte, err error) {
 			return newHeader(fs), nil, rerr
 		}
 
-		key, value, perr := parseHeaderFieldLine(kv)
+		key, value, perr := parseHeaderFieldLine(kv, lineOff)
 		if perr != nil {
 			// raw only needs bytes from the first bad line onward: nothing
 			// before checkpointFields is ever part of leftover.

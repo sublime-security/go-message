@@ -1257,3 +1257,45 @@ func TestNestedMultipartHyphenBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestMalformedPartHeaderOffsetResetsPerPart(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		eol  string
+	}{
+		{"CRLF", "\r\n"},
+		{"LF", "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eol := tc.eol
+			body := "--b" + eol +
+				"A: b" + eol + "bogus" + eol + eol + "one" + eol +
+				"--b" + eol +
+				"Longer-Key: value" + eol + "bogus" + eol + eol + "two" + eol +
+				"--b--" + eol
+			mr := NewMultipartReader(strings.NewReader(body), "b")
+
+			wants := []int{len("A: b") + len(eol), len("Longer-Key: value") + len(eol)}
+			for i, want := range wants {
+				p, err := mr.NextPart()
+				if p == nil {
+					t.Fatalf("part %d: NextPart returned nil part: %v", i+1, err)
+				}
+				partErr, ok := errors.AsType[*MalformedPartHeaderError](err)
+				if !ok {
+					t.Fatalf("part %d: got %v, want *MalformedPartHeaderError", i+1, err)
+				}
+				hdrErr, ok := errors.AsType[*MalformedHeaderError](err)
+				if !ok {
+					t.Fatalf("part %d: got %v, want wrapped *MalformedHeaderError", i+1, err)
+				}
+				if !errors.Is(partErr, hdrErr) {
+					t.Errorf("part %d: MalformedHeaderError is not wrapped by MalformedPartHeaderError", i+1)
+				}
+				if hdrErr.Kind != MalformedLine || hdrErr.Offset != want {
+					t.Errorf("part %d: got kind %v offset %v, want kind %v offset %v", i+1, hdrErr.Kind, hdrErr.Offset, MalformedLine, want)
+				}
+			}
+		})
+	}
+}
