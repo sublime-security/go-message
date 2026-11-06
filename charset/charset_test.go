@@ -2,10 +2,13 @@ package charset
 
 import (
 	"bytes"
+	"errors"
 	"io"
-	"io/ioutil"
+
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/htmlindex"
 )
 
 var testCharsets = []struct {
@@ -70,7 +73,7 @@ func TestCharsetReader(t *testing.T) {
 		if test.decoded != "" {
 			if err != nil {
 				t.Errorf("Expected no error when creating reader for charset %q, but got: %v", test.charset, err)
-			} else if b, err := ioutil.ReadAll(r); err != nil {
+			} else if b, err := io.ReadAll(r); err != nil {
 				t.Errorf("Expected no error when reading charset %q, but got: %v", test.charset, err)
 			} else if s := string(b); s != test.decoded {
 				t.Errorf("Expected decoded text to be %q but got %q", test.decoded, s)
@@ -119,5 +122,18 @@ func TestDisabledCharsetWriter(t *testing.T) {
 	_, err := Writer("DISABLED", buf)
 	if err == nil {
 		t.Errorf("Writer(): expected disabled charset to return an error")
+	}
+}
+
+func TestUnknownCharsetWrapsCause(t *testing.T) {
+	const name = "no-such-charset"
+	_, want := htmlindex.Get(name)
+	if want == nil {
+		t.Fatalf("htmlindex.Get(%q): expected an error", name)
+	}
+
+	_, err := charsetEncoding(name)
+	if !errors.Is(err, want) {
+		t.Errorf("charsetEncoding(%q) = %v, want an error wrapping %v", name, err, want)
 	}
 }

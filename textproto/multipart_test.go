@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/textproto"
 	"reflect"
 	"strings"
@@ -284,7 +283,7 @@ Oh no, premature EOF!
 	if err != nil {
 		t.Fatalf("didn't get a part")
 	}
-	_, err = io.Copy(ioutil.Discard, part)
+	_, err = io.Copy(io.Discard, part)
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected error io.ErrUnexpectedEOF; got %v", err)
 	}
@@ -349,7 +348,7 @@ Body 2
 		if !reflect.DeepEqual(headerToMap(part.Header), hdr) {
 			t.Errorf("Part %d: part.Header = %v, want %v", i, part.Header, hdr)
 		}
-		data, err := ioutil.ReadAll(part)
+		data, err := io.ReadAll(part)
 		expectEq(t, body, string(data), fmt.Sprintf("Part %d body", i))
 		if err != nil {
 			t.Fatalf("Part %d: ReadAll failed: %v", i, err)
@@ -379,7 +378,7 @@ func TestLineContinuation(t *testing.T) {
 
 	r := NewMultipartReader(strings.NewReader(testBody), "Apple-Mail-2-292336769")
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		part, err := r.NextPart()
 		if err != nil {
 			t.Fatalf("didn't get a part")
@@ -439,14 +438,14 @@ yO7WvrlwzA0uLzrD+VkKqViwl9IfTBVNFMyc/x9alloiPPlqhQAAAABJRU5ErkJggg==
 	if err != nil {
 		t.Fatalf("reading text/plain part: %v", err)
 	}
-	if b, err := ioutil.ReadAll(p); string(b) != "*body*\n" || err != nil {
+	if b, err := io.ReadAll(p); string(b) != "*body*\n" || err != nil {
 		t.Fatalf("reading text/plain part: got %q, %v", b, err)
 	}
 	p, err = mr2.NextPart()
 	if err != nil {
 		t.Fatalf("reading text/html part: %v", err)
 	}
-	if b, err := ioutil.ReadAll(p); string(b) != "<b>body</b>\n" || err != nil {
+	if b, err := io.ReadAll(p); string(b) != "<b>body</b>\n" || err != nil {
 		t.Fatalf("reading text/html part: got %q, %v", b, err)
 	}
 
@@ -835,7 +834,7 @@ Cases:
 				t.Errorf("in test %q, NextPart: %v", tt.name, err)
 				continue Cases
 			}
-			pbody, err := ioutil.ReadAll(p)
+			pbody, err := io.ReadAll(p)
 			if err != nil {
 				t.Errorf("in test %q, error reading part: %v", tt.name, err)
 				continue Cases
@@ -867,7 +866,7 @@ func partsFromReader(r *MultipartReader) ([]headerBody, error) {
 		if err != nil {
 			return nil, fmt.Errorf("NextPart: %v", err)
 		}
-		pbody, err := ioutil.ReadAll(p)
+		pbody, err := io.ReadAll(p)
 		if err != nil {
 			return nil, fmt.Errorf("error reading part: %v", err)
 		}
@@ -949,7 +948,7 @@ func TestMalformedPartHeaderRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("part 1 NextPart: %v", err)
 	}
-	b, _ := ioutil.ReadAll(p)
+	b, _ := io.ReadAll(p)
 	if got, want := string(b), "Hi -- thanks for the call earlier."; got != want {
 		t.Errorf("part 1 body: got %q, want %q", got, want)
 	}
@@ -965,7 +964,7 @@ func TestMalformedPartHeaderRecovery(t *testing.T) {
 	if got, want := p.Header.Get("Content-Type"), "text/html; charset=utf-8"; got != want {
 		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
 	}
-	b, _ = ioutil.ReadAll(p)
+	b, _ = io.ReadAll(p)
 	if got, want := string(b), "<html><body>phish</body></html>"; got != want {
 		t.Errorf("part 2 body: got %q, want %q", got, want)
 	}
@@ -1006,7 +1005,7 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 	if got := p.Header.Get("Content-Type"); got != "" {
 		t.Errorf("part 1 Content-Type: got %q, want empty", got)
 	}
-	b, _ := ioutil.ReadAll(p)
+	b, _ := io.ReadAll(p)
 	if got, want := string(b), "first bad line\r\nsecond bad line\r\n\r\nskipped body"; got != want {
 		t.Errorf("part 1 body: got %q, want %q", got, want)
 	}
@@ -1019,7 +1018,7 @@ func TestMalformedPartHeaderSkip(t *testing.T) {
 	if got, want := p.Header.Get("Content-Type"), "text/plain"; got != want {
 		t.Errorf("part 2 Content-Type: got %q, want %q", got, want)
 	}
-	b, _ = ioutil.ReadAll(p)
+	b, _ = io.ReadAll(p)
 	if got, want := string(b), "good body"; got != want {
 		t.Errorf("part 2 body: got %q, want %q", got, want)
 	}
@@ -1067,7 +1066,7 @@ func TestMalformedPartHeaderPreservesSubBoundary(t *testing.T) {
 	if got, want := ip.Header.Get("Content-Type"), "text/plain"; got != want {
 		t.Errorf("inner Content-Type: got %q, want %q", got, want)
 	}
-	b, _ := ioutil.ReadAll(ip)
+	b, _ := io.ReadAll(ip)
 	if got, want := string(b), "real content"; got != want {
 		t.Errorf("inner body: got %q, want %q", got, want)
 	}
@@ -1129,7 +1128,7 @@ func TestMalformedPartHeaderInitialLinePreservesLineEnding(t *testing.T) {
 	if !IsMalformedPartHeader(err) || p == nil {
 		t.Fatalf("NextPart: expected a recovered part with IsMalformedPartHeader, got p=%v err=%v", p, err)
 	}
-	b, _ := ioutil.ReadAll(p)
+	b, _ := io.ReadAll(p)
 	if got, want := string(b), " initial bad line\r\nsecond bad line\r\n"; got != want {
 		t.Errorf("body: got %q, want %q", got, want)
 	}
@@ -1150,7 +1149,7 @@ func TestMalformedPartHeaderPreservesEmptyKeyLine(t *testing.T) {
 	if !IsMalformedPartHeader(err) || p == nil {
 		t.Fatalf("NextPart: expected a recovered part with IsMalformedPartHeader, got p=%v err=%v", p, err)
 	}
-	b, _ := ioutil.ReadAll(p)
+	b, _ := io.ReadAll(p)
 	if got, want := string(b), "bad line one\r\n: emptykey\r\nsecond bad line\r\n"; got != want {
 		t.Errorf("body: got %q, want %q", got, want)
 	}
@@ -1163,10 +1162,10 @@ func TestMatchAfterPrefix(t *testing.T) {
 	prefix := []byte("\r\n--foo")
 
 	tests := []struct {
-		name     string
-		buf      []byte
-		readErr  error
-		want     int
+		name    string
+		buf     []byte
+		readErr error
+		want    int
 	}{
 		{"buf equals prefix, no err", prefix, nil, 0},
 		{"buf equals prefix, at EOF", prefix, eof, +1},

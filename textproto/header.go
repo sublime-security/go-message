@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/textproto"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -93,8 +93,8 @@ func HeaderFromMap(m map[string][]string) Header {
 		}
 	}
 
-	sort.SliceStable(fs, func(i, j int) bool {
-		return fs[i].k < fs[j].k
+	slices.SortStableFunc(fs, func(a, b *headerField) int {
+		return strings.Compare(a.k, b.k)
 	})
 
 	return newHeader(fs)
@@ -110,12 +110,12 @@ func HeaderFromMap(m map[string][]string) Header {
 // kv is directly added to the underlying structure and therefore should not be
 // modified after the AddRaw call.
 func (h *Header) AddRaw(kv []byte) {
-	colon := bytes.IndexByte(kv, ':')
-	if colon == -1 {
+	rawKey, rawValue, ok := bytes.Cut(kv, []byte(":"))
+	if !ok {
 		panic("textproto: Header.AddRaw: missing colon")
 	}
-	k := textproto.CanonicalMIMEHeaderKey(string(trim(kv[:colon])))
-	v := trimAroundNewlines(kv[colon+1:])
+	k := textproto.CanonicalMIMEHeaderKey(string(trim(rawKey)))
+	v := trimAroundNewlines(rawValue)
 
 	if h.m == nil {
 		h.m = make(map[string][]*headerField)
@@ -201,9 +201,9 @@ func (h *Header) Del(k string) {
 	delete(h.m, k)
 
 	// Delete existing keys
-	for i := len(h.l) - 1; i >= 0; i-- {
-		if h.l[i].k == k {
-			h.l = append(h.l[:i], h.l[i+1:]...)
+	for i, v := range slices.Backward(h.l) {
+		if v.k == k {
+			h.l = slices.Delete(h.l, i, i+1)
 		}
 	}
 }
@@ -311,7 +311,7 @@ func (fs *headerFields) Del() {
 	for i, ff := range fs.h.m[f.k] {
 		if ff == f {
 			ok = true
-			fs.h.m[f.k] = append(fs.h.m[f.k][:i], fs.h.m[f.k][i+1:]...)
+			fs.h.m[f.k] = slices.Delete(fs.h.m[f.k], i, i+1)
 			if len(fs.h.m[f.k]) == 0 {
 				delete(fs.h.m, f.k)
 			}
@@ -322,7 +322,7 @@ func (fs *headerFields) Del() {
 		panic("message: field not found in Header.m")
 	}
 
-	fs.h.l = append(fs.h.l[:fs.index()], fs.h.l[fs.index()+1:]...)
+	fs.h.l = slices.Delete(fs.h.l, fs.index(), fs.index()+1)
 	fs.cur--
 }
 
@@ -383,7 +383,7 @@ func (fs *headerFieldsByKey) Del() {
 	for i := range fs.h.l {
 		if f == fs.h.l[i] {
 			ok = true
-			fs.h.l = append(fs.h.l[:i], fs.h.l[i+1:]...)
+			fs.h.l = slices.Delete(fs.h.l, i, i+1)
 			break
 		}
 	}
@@ -391,7 +391,7 @@ func (fs *headerFieldsByKey) Del() {
 		panic("message: field not found in Header.l")
 	}
 
-	fs.h.m[fs.k] = append(fs.h.m[fs.k][:fs.index()], fs.h.m[fs.k][fs.index()+1:]...)
+	fs.h.m[fs.k] = slices.Delete(fs.h.m[fs.k], fs.index(), fs.index()+1)
 	if len(fs.h.m[fs.k]) == 0 {
 		delete(fs.h.m, fs.k)
 	}
@@ -518,13 +518,12 @@ func trimAroundNewlines(v []byte) string {
 	var b strings.Builder
 	b.Grow(len(v))
 	for {
-		i := bytes.IndexByte(v, '\n')
-		if i < 0 {
-			writeContinued(&b, v)
+		line, rest, found := bytes.Cut(v, []byte("\n"))
+		writeContinued(&b, line)
+		if !found {
 			break
 		}
-		writeContinued(&b, v[:i])
-		v = v[i+1:]
+		v = rest
 	}
 
 	return b.String()
@@ -596,19 +595,19 @@ func readHeaderInitialLine(r *bufio.Reader, off *int) (line []byte, err error) {
 func parseHeaderFieldLine(kv []byte, off int) (key, value string, err error) {
 	// Key ends at first colon; should not have trailing spaces but they
 	// appear in the wild, violating specs, so we remove them if present.
-	i := bytes.IndexByte(kv, ':')
-	if i < 0 {
+	rawKey, rawValue, ok := bytes.Cut(kv, []byte(":"))
+	if !ok {
 		return "", "", &MalformedHeaderError{Kind: MalformedLine, Offset: off}
 	}
 
-	keyBytes := trim(kv[:i])
+	keyBytes := trim(rawKey)
 
 	// Verify that there are no invalid characters in the header key.
 	// See RFC 5322 Section 2.2
 	for _, c := range keyBytes {
 		if !validHeaderKeyByte(c) {
 			lead := 0
-			for lead < i && isSpace(kv[lead]) {
+			for lead < len(rawKey) && isSpace(kv[lead]) {
 				lead++
 			}
 			return "", "", &MalformedHeaderError{Kind: MalformedKey, Offset: off + lead}
@@ -616,7 +615,7 @@ func parseHeaderFieldLine(kv []byte, off int) (key, value string, err error) {
 	}
 
 	key = textproto.CanonicalMIMEHeaderKey(string(keyBytes))
-	value = trimAroundNewlines(kv[i+1:])
+	value = trimAroundNewlines(rawValue)
 	return key, value, nil
 }
 
@@ -747,8 +746,7 @@ func formatHeaderField(k, v string) string {
 
 // WriteHeader writes a MIME header to w.
 func WriteHeader(w io.Writer, h Header) error {
-	for i := len(h.l) - 1; i >= 0; i-- {
-		f := h.l[i]
+	for i, f := range slices.Backward(h.l) {
 		if rawField, err := f.raw(); err == nil {
 			if _, err := w.Write(rawField); err != nil {
 				return err

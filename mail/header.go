@@ -70,7 +70,7 @@ func (p *headerParser) consumeComment() (string, bool) {
 	// '(' already consumed.
 	depth := 1
 
-	var comment string
+	var comment strings.Builder
 	for {
 		if p.empty() || depth == 0 {
 			break
@@ -85,13 +85,13 @@ func (p *headerParser) consumeComment() (string, bool) {
 		}
 
 		if depth > 0 {
-			comment += p.s[:1]
+			comment.WriteString(p.s[:1])
 		}
 
 		p.s = p.s[1:]
 	}
 
-	return comment, depth == 0
+	return comment.String(), depth == 0
 }
 
 func (p *headerParser) parseAtomText(dot bool) (string, error) {

@@ -24,7 +24,8 @@ func (u UnknownEncodingError) Error() string {
 // IsUnknownEncoding returns a boolean indicating whether the error is known to
 // report that the encoding advertised by the entity is unknown.
 func IsUnknownEncoding(err error) bool {
-	return errors.As(err, new(UnknownEncodingError))
+	_, ok := errors.AsType[UnknownEncodingError](err)
+	return ok
 }
 
 func encodingReader(enc string, r io.Reader) (io.Reader, error) {
@@ -78,7 +79,7 @@ type whitespaceReplacingReader struct {
 func (r *whitespaceReplacingReader) Read(p []byte) (int, error) {
 	n, err := r.wrapped.Read(p)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if p[i] == ' ' || p[i] == '\t' {
 			p[i] = '\n'
 		}
@@ -101,8 +102,7 @@ func (w *lineWrapper) Write(b []byte) (int, error) {
 		var l []byte
 		l, b = cutLine(b, w.maxLineLen-w.curLineLen)
 
-		lf := bytes.HasSuffix(l, []byte("\n"))
-		l = bytes.TrimSuffix(l, []byte("\n"))
+		l, lf := bytes.CutSuffix(l, []byte("\n"))
 
 		n, err := w.w.Write(l)
 		if err != nil {
@@ -141,7 +141,7 @@ func (w *lineWrapper) Write(b []byte) (int, error) {
 }
 
 func cutLine(b []byte, max int) ([]byte, []byte) {
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if b[i] == '\r' && i == max {
 			continue
 		}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"golang.org/x/text/encoding/ianaindex"
 	"io"
-	"io/ioutil"
 	"math"
 	"reflect"
 	"strings"
@@ -27,7 +26,7 @@ func TestNewEntity(t *testing.T) {
 	e := testMakeEntity()
 
 	expected := "cc sava"
-	if b, err := ioutil.ReadAll(e.Body); err != nil {
+	if b, err := io.ReadAll(e.Body); err != nil {
 		t.Error("Expected no error while reading entity body, got", err)
 	} else if s := string(b); s != expected {
 		t.Errorf("Expected %q as entity body but got %q", expected, s)
@@ -129,7 +128,7 @@ func testMultipart(t *testing.T, e *Entity) {
 		if mediaType := p.Header.Get("Content-Type"); mediaType != expectedType {
 			t.Errorf("Expected part Content-Type to be %q, got %q", expectedType, mediaType)
 		}
-		if b, err := ioutil.ReadAll(p.Body); err != nil {
+		if b, err := io.ReadAll(p.Body); err != nil {
 			t.Error("Expected no error while reading part body, got", err)
 		} else if s := string(b); s != expectedBody {
 			t.Errorf("Expected %q as part body but got %q", expectedBody, s)
@@ -150,7 +149,7 @@ func TestNewMultipart(t *testing.T) {
 func TestNewMultipart_read(t *testing.T) {
 	e := testMakeMultipart()
 
-	if b, err := ioutil.ReadAll(e.Body); err != nil {
+	if b, err := io.ReadAll(e.Body); err != nil {
 		t.Error("Expected no error while reading multipart body, got", err)
 	} else if s := string(b); s != testMultipartBody {
 		t.Errorf("Expected %q as multipart body but got %q", testMultipartBody, s)
@@ -172,9 +171,9 @@ func TestRead_single(t *testing.T) {
 		t.Fatalf("Read() = %v", err)
 	}
 
-	b, err := ioutil.ReadAll(e.Body)
+	b, err := io.ReadAll(e.Body)
 	if err != nil {
-		t.Fatalf("ioutil.ReadAll() = %v", err)
+		t.Fatalf("io.ReadAll() = %v", err)
 	}
 
 	expected := "Message body"
@@ -475,11 +474,11 @@ func TestNew_unknownTransferEncoding(t *testing.T) {
 	if !IsUnknownEncoding(err) {
 		t.Fatal("New(unknown transfer encoding): expected an error that verifies IsUnknownEncoding")
 	}
-	if !errors.As(err, &UnknownEncodingError{}) {
-		t.Fatal("New(unknown transfer encoding): expected an error that verifies errors.As(err, &EncodingError{})")
+	if _, ok := errors.AsType[UnknownEncodingError](err); !ok {
+		t.Fatal("New(unknown transfer encoding): expected an error that verifies errors.AsType[UnknownEncodingError]")
 	}
 
-	if b, err := ioutil.ReadAll(e.Body); err != nil {
+	if b, err := io.ReadAll(e.Body); err != nil {
 		t.Error("Expected no error while reading entity body, got", err)
 	} else if s := string(b); s != expected {
 		t.Errorf("Expected %q as entity body but got %q", expected, s)
@@ -501,7 +500,7 @@ func TestNew_unknownCharset(t *testing.T) {
 		t.Fatal("New(unknown charset): expected an error that verifies IsUnknownCharset")
 	}
 
-	if b, err := ioutil.ReadAll(e.Body); err != nil {
+	if b, err := io.ReadAll(e.Body); err != nil {
 		t.Error("Expected no error while reading entity body, got", err)
 	} else if s := string(b); s != expected {
 		t.Errorf("Expected %q as entity body but got %q", expected, s)
@@ -537,7 +536,7 @@ func TestNew_paddedBase64(t *testing.T) {
 		t.Fatal("New(padded Base64): expected no error, got", err)
 	}
 
-	if b, err := ioutil.ReadAll(e.Body); err != nil {
+	if b, err := io.ReadAll(e.Body); err != nil {
 		t.Error("Expected no error while reading entity body, got", err)
 	} else if s := string(b); s != expected {
 		t.Errorf("Expected %q as entity body but got %q", expected, s)
@@ -565,7 +564,7 @@ func walkCollect(e *Entity) ([]testWalkPart, error) {
 	err := e.Walk(func(path []int, part *Entity, err error) error {
 		var body string
 		if part.MultipartReader() == nil {
-			b, err := ioutil.ReadAll(part.Body)
+			b, err := io.ReadAll(part.Body)
 			if err != nil {
 				return err
 			}
